@@ -405,6 +405,14 @@
         power_zones: [Keyboard, Lightbar],
     ),
     (
+        // NOTE: this entry describes the LEGACY 0x5d protocol, which live
+        // testing found does NOT actually control this board's lighting at
+        // all (see docs/g615lr-aura-protocol.md). Real per-zone/lightbar
+        // color control on this laptop goes through a second, separate
+        // protocol (HID Feature report 0x04) implemented in
+        // rog-aura::lightbar_2025, not yet wired into asusd. Do not assume
+        // this RON entry is functional for chassis lighting until that's
+        // done.
         device_name: "G615LR",
         product_id: "",
         layout_name: "g634j-per-key",

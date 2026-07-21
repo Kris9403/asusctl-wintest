@@ -23,6 +23,11 @@ pub mod usb;
 
 pub mod keyboard;
 
+/// Second, undocumented Aura protocol found on the 2025 ROG Strix G16
+/// refresh (`G615LR`). See module docs for the full writeup -- this laptop's
+/// lightbar does NOT respond to the classic protocol in [`usb`] at all.
+pub mod lightbar_2025;
+
 pub const AURA_LAPTOP_LED_MSG_LEN: usize = 17;
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
