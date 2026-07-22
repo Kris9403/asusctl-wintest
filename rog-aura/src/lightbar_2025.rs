@@ -123,19 +123,18 @@ impl Lightbar2025Zone {
 
     /// Whether this zone's color slot needs the G/R channel swap.
     ///
-    /// UNVERIFIED / INCONSISTENT -- see module docs. This reflects the last
-    /// self-consistent isolated-test result obtained, not a confirmed final
-    /// answer. Re-test before relying on it.
+    /// UNVERIFIED / INCONSISTENT -- see module docs. This is the LATEST
+    /// result (BackBarLeft/Right and CornerBackLeft/Right flipped to
+    /// no-swap after re-testing with a non-invariant color, Saffron
+    /// #FF9933) but an EARLIER isolated test with pure Red/Green found the
+    /// opposite for those same four zones. Both tests used non-invariant
+    /// colors and were self-consistent at the time. Leading suspect:
+    /// Armoury Crate's background services (ArmourySwAgent,
+    /// LightingService, ROGLiveService, etc.) were never successfully
+    /// stopped during testing and may race writes to this interface. Kill
+    /// those services fully before re-testing this table.
     pub fn needs_grb_swap(&self) -> bool {
-        matches!(
-            self,
-            Self::BackBarLeft
-                | Self::BackBarRight
-                | Self::CornerBackLeft
-                | Self::CornerBackRight
-                | Self::SideLeftFront
-                | Self::SideRightBack
-        )
+        matches!(self, Self::SideLeftFront | Self::SideRightBack)
     }
 }
 
@@ -209,10 +208,10 @@ mod tests {
     #[test]
     fn swap_zone_reorders_channels() {
         let pkt = build_lightbar_2025_packet(&[Lightbar2025ZoneColour {
-            zone: Lightbar2025Zone::BackBarLeft,
+            zone: Lightbar2025Zone::SideLeftFront,
             colour: Colour { r: 255, g: 0, b: 0 },
         }]);
-        // BackBarLeft needs swap -> G,R,B on the wire
+        // SideLeftFront needs swap -> G,R,B on the wire
         assert_eq!(pkt[19], 0); // g
         assert_eq!(pkt[20], 255); // r
         assert_eq!(pkt[21], 0); // b
