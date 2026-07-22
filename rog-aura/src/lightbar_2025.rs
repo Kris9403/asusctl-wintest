@@ -29,6 +29,14 @@
 //! wLength       = 0x0033 (51 bytes)
 //! ```
 //!
+//! On Linux this is sent via the `HIDIOCSFEATURE` ioctl, NOT a plain
+//! `write()` (which sends an Output report, a different report type this
+//! device does not act on for this report ID). See
+//! `rog_platform::hid_raw::HidRaw::set_feature_report` -- the packet built
+//! by [`build_lightbar_2025_packet`] below is exactly what that method
+//! expects. This ioctl wrapper is implemented but not yet compile- or
+//! hardware-verified on a live Linux boot -- see `docs/g615lr-aura-protocol.md`.
+//!
 //! Payload (51 bytes total):
 //!
 //! | Offset | Meaning |

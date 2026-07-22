@@ -1,12 +1,22 @@
 use std::cell::RefCell;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
+use std::os::fd::AsRawFd;
 use std::path::PathBuf;
 
 use log::{info, warn};
 use udev::Device;
 
 use crate::error::{PlatformError, Result};
+
+// HIDIOCSFEATURE(len) from <linux/hidraw.h>: `_IOC(_IOC_WRITE|_IOC_READ, 'H',
+// 0x06, len)`. This is what an HID **Feature** report requires on Linux --
+// the plain `write_bytes()` below sends an **Output** report instead, which
+// is a different report type some devices (e.g. the G615LR's undocumented
+// per-zone lightbar protocol, report ID 0x04) silently ignore. nix's
+// `ioctl_readwrite_buf!` recomputes the request code from the buffer's
+// actual length at call time, matching the C macro's per-length behavior.
+nix::ioctl_readwrite_buf!(hidiocsfeature, b'H', 0x06, u8);
 
 /// A USB device that utilizes hidraw for I/O
 #[derive(Debug)]
@@ -57,7 +67,14 @@ impl HidRaw {
                             );
                         }
                         return Ok(Self {
-                            file: RefCell::new(OpenOptions::new().write(true).open(dev_node)?),
+                            // read(true) is needed alongside write(true) for
+                            // HIDIOCSFEATURE (see set_feature_report below) --
+                            // plain Output-report write_bytes() doesn't need
+                            // it, but sharing one handle for both is simpler
+                            // than tracking two.
+                            file: RefCell::new(
+                                OpenOptions::new().read(true).write(true).open(dev_node)?,
+                            ),
                             devfs_path: dev_node.to_owned(),
                             prod_id: this_id_product.to_string_lossy().into(),
                             syspath: endpoint.syspath().into(),
@@ -118,6 +135,29 @@ impl HidRaw {
             // TODO: re-get the file if error?
             file.write_all(message).map_err(|e| {
                 PlatformError::IoPath(self.devfs_path.to_string_lossy().to_string(), e)
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Send an HID **Feature** report via the `HIDIOCSFEATURE` ioctl, as
+    /// opposed to `write_bytes()` which sends an **Output** report. Some
+    /// devices only respond to one or the other for a given report ID --
+    /// e.g. the G615LR's per-zone lightbar protocol (report ID `0x04`,
+    /// see `rog_aura::lightbar_2025`) is Feature-report-only; sending it as
+    /// an Output report via plain `write()` is accepted by the kernel but
+    /// produces no visible effect on the hardware.
+    ///
+    /// `report` must start with the report ID byte, matching the same
+    /// layout used for the Windows `HidD_SetFeature` call this mirrors.
+    pub fn set_feature_report(&self, report: &[u8]) -> Result<()> {
+        let mut buf = report.to_vec();
+        if let Ok(file) = self.file.try_borrow() {
+            unsafe { hidiocsfeature(file.as_raw_fd(), &mut buf) }.map_err(|errno| {
+                PlatformError::IoPath(
+                    self.devfs_path.to_string_lossy().to_string(),
+                    std::io::Error::from(errno),
+                )
             })?;
         }
         Ok(())

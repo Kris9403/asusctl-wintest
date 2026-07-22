@@ -4,6 +4,7 @@ use config::AuraConfig;
 use config_traits::StdConfig;
 use log::info;
 use rog_aura::keyboard::{AuraLaptopUsbPackets, LedUsbPackets};
+use rog_aura::lightbar_2025::{build_lightbar_2025_packet, Lightbar2025ZoneColour};
 use rog_aura::usb::{AURA_LAPTOP_LED_APPLY, AURA_LAPTOP_LED_SET};
 use rog_aura::{AuraDeviceType, AuraEffect, LedBrightness, PowerZones, AURA_LAPTOP_LED_MSG_LEN};
 use rog_platform::hid_raw::HidRaw;
@@ -125,6 +126,33 @@ impl Aura {
         }
 
         Ok(())
+    }
+
+    /// Write a batch of zone colours (1-8 zones) using the second Aura
+    /// protocol found on 2025-generation Strix boards like the G615LR --
+    /// HID **Feature** report, ID `0x04`, see `rog_aura::lightbar_2025` for
+    /// the packet format and `docs/g615lr-aura-protocol.md` for the full
+    /// writeup. Distinct from `write_effect_and_apply`, which speaks the
+    /// older `0x5d` protocol these particular laptops don't act on for
+    /// chassis lighting -- do not route G615LR calls through that method.
+    ///
+    /// UNVERIFIED: reviewed against the ioctl definition and the confirmed
+    /// working Windows `HidD_SetFeature` call this mirrors, but not yet
+    /// compiled or run against real hardware on Linux. Also note the
+    /// per-zone colour-channel swap table in `Lightbar2025Zone::needs_grb_swap`
+    /// is itself still unresolved (see that method's doc comment) -- fix
+    /// that before trusting colours out of this call to be correct.
+    pub async fn write_lightbar_2025(
+        &self,
+        zones: &[Lightbar2025ZoneColour],
+    ) -> Result<(), RogError> {
+        if let Some(hid_raw) = &self.hid {
+            let packet = build_lightbar_2025_packet(zones);
+            hid_raw.lock().await.set_feature_report(&packet)?;
+            Ok(())
+        } else {
+            Err(RogError::NoAuraKeyboard)
+        }
     }
 
     pub async fn set_brightness(&self, value: u8) -> Result<(), RogError> {

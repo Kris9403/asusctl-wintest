@@ -139,24 +139,33 @@ existing triangle-wave color math this can reuse).
 ## Impact on `asusctl`
 
 1. `rog_platform::hid_raw::HidRaw::new` (in `rog-platform/src/hid_raw.rs`)
-   currently grabs the *first* `/dev/hidrawN` matching `idProduct`,
-   unconditionally, and always does a plain `write()` (Output report). For
-   this laptop that's the wrong report type for protocol #1 and possibly a
-   silent no-op for protocol #2 (no interrupt-OUT endpoint exists on this
-   board). Supporting this laptop correctly needs either a new code path
-   that opens by report-ID/interface capability rather than first-match, or
-   a Feature-report-capable write method alongside the existing
-   `write_bytes`.
+   still grabs the *first* `/dev/hidrawN` matching `idProduct`,
+   unconditionally — for this laptop that's the wrong interface for protocol
+   #1 unless it happens to be first (matches the Windows finding that report
+   `0x04` and report `0x5d` live on different interfaces; needs a real
+   per-interface probe, not first-match, to be reliable). A
+   `set_feature_report` method (`HIDIOCSFEATURE` ioctl, alongside the
+   existing Output-report `write_bytes`) has been added to unblock sending
+   protocol #1 at all — **not yet compiled or hardware-tested on Linux**,
+   only reviewed against the ioctl's C definition and the working Windows
+   `HidD_SetFeature` call it mirrors.
 2. `rog-aura`'s `aura_support.ron` entry for `G615LR` should be updated to
    reflect that it needs protocol #1 for actual color control — the current
    entry (basic zones, `advanced_type: r#None`) implies the classic
    USB-HID zoned protocol works for this board's lightbar, which this
    investigation shows is false.
 3. `Lightbar2025Zone`/`build_lightbar_2025_packet` in
-   [`rog-aura::lightbar_2025`](../rog-aura/src/lightbar_2025.rs) are ready
-   to use as the packet-building layer; they are **not yet wired into**
-   `asusd`'s dispatch logic (`asusd/src/aura_laptop/mod.rs`) or exposed over
-   D-Bus — that requires a maintainer with real Linux hardware to validate
-   the swap table and interface-selection logic (item 1) before it's safe to
-   ship, since the biggest open question (per-zone color swap) could not be
-   fully resolved in this investigation.
+   [`rog-aura::lightbar_2025`](../rog-aura/src/lightbar_2025.rs) are used by
+   a new `Aura::write_lightbar_2025` method in
+   [`asusd/src/aura_laptop/mod.rs`](../asusd/src/aura_laptop/mod.rs), which
+   calls the new `HidRaw::set_feature_report` (item 1). That method is
+   **callable but not yet called** — `write_current_config_mode` /
+   `write_effect_and_apply` still dispatch purely by `AuraDeviceType` and
+   have no G615LR-aware branch, and there's no D-Bus method exposing it.
+   Also, `AuraEffect` (the existing config type) only carries 1-2 colours,
+   not the 16 independent per-zone colours this protocol needs, so real
+   dispatch wiring needs either a new config/D-Bus shape or a translation
+   layer, not just an `if let` branch. None of this is safe to ship before
+   a maintainer with real Linux hardware validates the swap table and
+   interface-selection logic (item 1) — the biggest open question (per-zone
+   colour swap) could not be fully resolved in this investigation.
