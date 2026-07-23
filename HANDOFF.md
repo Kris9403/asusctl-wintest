@@ -999,3 +999,66 @@ not something that fires during normal `0x04` operation. **Closing this
 thread with actual confidence** -- real, documented, reproducible gap in
 ASUS's tooling, but the evidence points away from it being connected to
 the lightbar protocol, not just "unconfirmed either way."
+
+### 12-zone real capture, byte-perfect, human-confirmed correct on every zone
+
+The strongest evidence produced this session. Same approach as the Q2
+test (priming via `HidSend.cs`, bypassing Armoury Crate entirely) but
+instead of one static zone, sent **12 of the 16 zones simultaneously**,
+each a distinct, unambiguous colour, via `aura_control.ps1` (using the
+corrected `$PHYSICAL_ZONES` map from earlier this session) -- first an
+explicit all-black reset, then the real colours, both while a live
+USBPcap capture ran. The human confirmed **every single zone matched**
+what was sent, on the physical hardware, twice (once before the capture
+pipeline was confirmed working, once after, both attempts visually
+identical). Saved at
+`usb_capture_session4/multizone_12x_confirmed.pcapng`.
+
+Real captured bytes (`t=37.37-37.40s`, chronological, one `0x0304` write
+per zone):
+
+| Wire ID | Physical zone | Colour sent | Raw bytes (zone id + colour slot) |
+|---|---|---|---|
+| `0x00` | kbd1 | `FF0000` | `04 01 01 00 00 ... ff 00 00 ff` |
+| `0x01` | kbd2 | `00FF00` | `04 01 01 01 00 ... 00 ff 00 ff` |
+| `0x02` | kbd3 | `0000FF` | `04 01 01 02 00 ... 00 00 ff ff` |
+| `0x03` | kbd4 | `FFFFFF` | `04 01 01 03 00 ... ff ff ff ff` |
+| `0x05` | back_left | `FF0000` | `04 01 01 05 00 ... ff 00 00 ff` |
+| `0x04` | back_right | `00FF00` | `04 01 01 04 00 ... 00 ff 00 ff` |
+| `0x07` | back_corner_left | `0000FF` | `04 01 01 07 00 ... 00 00 ff ff` |
+| `0x06` | back_corner_right | `FFFF00` | `04 01 01 06 00 ... ff ff 00 ff` |
+| `0x08` | right_bar_back | *(untouched, forced black by `aura_control.ps1`)* | `04 01 01 08 00 ... 00 00 00 ff` |
+| `0x09` | left_bar_back | *(untouched)* | `04 01 01 09 00 ... 00 00 00 ff` |
+| `0x0A` | right_bar_front | *(untouched)* | `04 01 01 0a 00 ... 00 00 00 ff` |
+| `0x0B` | left_bar_front | *(untouched)* | `04 01 01 0b 00 ... 00 00 00 ff` |
+| `0x0C` | front_corner_right | `FF8000` | `04 01 01 0c 00 ... ff 80 00 ff` |
+| `0x0D` | front_corner_left | `FFFFFF` | `04 01 01 0d 00 ... ff ff ff ff` |
+| `0x0E` | front_bar_right | `00FFFF` | `04 01 01 0e 00 ... 00 ff ff ff` |
+| `0x0F` | front_bar_left | `FF00FF` | `04 01 01 0f 00 ... ff 00 ff ff` |
+
+(`aura_control.ps1` always writes all 16 zones every call -- the four
+side-bar zones weren't in the requested list this run, so they were sent
+as explicit black rather than skipped, which is why they're in the
+capture too and confirms they don't need separate testing to prove the
+send path works for them.)
+
+This is the single richest, most-validated piece of evidence in the
+entire investigation: real wire bytes, real distinct colours across
+12 of 16 zones at once, direct human visual confirmation of every one,
+matching the corrected zone map exactly, all in one capture file. If
+anything Linux tries produces different bytes than this table for the
+same physical zones, that's the bug -- this is now the reference to
+diff against, not prose.
+
+**One tooling gotcha worth recording** (cost real time this session):
+launching multiple parallel `tshark` captures via PowerShell's
+`Start-Process` from within an automated/scripted invocation is
+unreliable -- of three launched together, only one reliably survived,
+even though all three showed as running processes momentarily. Launching
+each capture as its own independent foreground-attached background
+process (not spawned via `Start-Process` from inside another script)
+worked reliably every time. Separately: passing a literal
+`\\.\USBPcap1`-style device path through Git Bash mangles it (collapses
+to a single backslash, `\.\USBPcap1`, which `tshark` rejects outright) --
+use a native PowerShell invocation for anything with that path syntax,
+never Bash.
