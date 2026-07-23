@@ -1171,3 +1171,83 @@ earlier this session, and it reflects the *corrected* zone map (not the
 original wrong one). Point at it instead of describing zones in prose
 when reporting which physical zone did what -- that's exactly what fixed
 the ambiguity last time.
+
+## Linux session 4 update — zone-map fix verified, first real 0x0305 test (negative result)
+
+Written 2026-07-23/24. Picked up all of the above after pulling Windows
+sessions 1/3/4 from the shared repo.
+
+**Zone map fixed and permanently regression-tested.** Independently
+re-derived the corrected zone map straight from the raw
+`WDL_G615LR.csv` grid coordinates (not just trusted the summary table),
+cross-checked against the labeled diagram, and against the human-confirmed
+12-zone capture -- all three agreed exactly. Renamed the 6 wrong
+`Lightbar2025Zone` variants in `rog-aura/src/lightbar_2025.rs` (wire ID
+values unchanged, only names), updated `needs_grb_swap()` to keep
+targeting the same two empirically-tested wire IDs under their corrected
+names, and added `matches_human_confirmed_capture` -- a permanent test
+that builds a packet for every zone/colour pair from
+`multizone_12x_confirmed.pcapng` and asserts exact byte match. All pass.
+Packet construction is now about as verified as it can be without new
+hardware evidence.
+
+**First Linux test of the `0x0305` animated-effects protocol Windows
+session 4 discovered -- negative result, but a clean one.** Two variants
+tried, both via `rog-platform/examples/`:
+
+1. `g615lr-0305-breathe-stream.rs` -- real priming (`SET_IDLE` x2, `0x0201`,
+   the `b3/b4/b5` triplet, real bytes) followed by 10 seconds of continuous
+   `0x0305` streaming with a triangle-wave `byte[9]` ramp matching the real
+   captured pattern from `usb_capture_session4/all_0305.txt` exactly
+   (`05 01 00 00 0f 00 ff 00 00 [ramp]`, ~16Hz). **Result: chassis went
+   RainbowCycle, identical to every other priming test -- no
+   distinguishable breathing/pulsing on top.**
+2. `g615lr-0305-only-stream.rs` -- same `0x0305` stream, but deliberately
+   *without* the `b3/b4/b5` triplet (just `SET_IDLE` + `0x0201`), against a
+   plain dark/static-black baseline, to rule out the triplet's own
+   RainbowCycle animation masking a subtler effect. **Result: nothing
+   changed at all, stayed dark for the full 10 seconds.**
+
+**Interpretation, not yet conclusive**: `0x0305` alone does nothing
+observable; `0x0305` after the `b3/b4/b5` triplet produces exactly what
+the triplet alone produces, no more. Two live possibilities, not
+distinguished by this test:
+- This specific EC firmware genuinely doesn't implement `0x0305`-driven
+  animation at all -- consistent with the broader pattern from Linux
+  session 3 Part A, where 7 of 12 classic `0x5d` modes turned out to be a
+  real firmware gap, not a code bug, on this specific board.
+- Something else Windows sends is still missing. The Windows capture that
+  characterized this protocol
+  (`usb_capture_session4/breathing_mode_capture.pcapng`) never identified
+  where the actual *colour* being modulated comes from -- zero `0x0304`
+  traffic during Breathing, and the triplet's own colour field is black --
+  so there's an acknowledged gap in Windows' own understanding of this
+  protocol too, not just Linux's reproduction of it. It's possible a
+  colour needs to be established through some mechanism neither side has
+  found yet before `0x0305` has anything to modulate.
+
+**Tried the "set colour first" idea, third negative result**:
+`g615lr-0305-with-color-first.rs` -- set a real red via the proven-working
+`0x5d` Static sequence (`b3,b5,b4` order), confirmed visibly red, *then*
+minimal priming (`SET_IDLE`+`0x0201` only, deliberately skipping the
+RainbowCycle-forcing triplet so it can't clobber the colour), then the
+`0x0305` handshake and breathing stream. **Result: stayed solid red for
+the full 10 seconds, no breathing/pulsing at all.** Three independent,
+controlled tests now agree: `0x0305` alone, `0x0305` after the priming
+triplet, and `0x0305` after establishing a real colour all produce zero
+observable effect beyond whatever the *other* mechanism already in play
+was doing. This is no longer "we haven't found the right precondition" --
+it's consistent, controlled negative evidence across every reasonable
+precondition tried.
+
+**Current conclusion**: either this specific EC firmware doesn't implement
+`0x0305`-driven modulation (matching the broader "real firmware gap, not a
+code bug" pattern already established for 7 of 12 classic `0x5d` modes in
+session 3 Part A), or there's a genuinely unidentified prerequisite neither
+side of this investigation has found yet -- Windows' own capture never
+established where the modulated colour comes from either, so this gap
+isn't unique to the Linux reproduction. Parking this specific protocol for
+now; pivoting to testing whether *combining* `0x0305` streaming with `0x04`
+zone writes (a different hypothesis -- not "does 0x0305 animate on its
+own," but "does keeping it alive change whether 0x04 finally sticks") does
+anything, per `QUESTIONS.md`'s Windows-session-4 question 2.
