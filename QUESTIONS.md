@@ -66,6 +66,22 @@ yet.
    approach has been structurally wrong (needs actual zone variety to be
    recognized as "a real session"), not something Linux-specific.
 
+   **ANSWERED (Windows session 3): no, zone variety is not required.** Ran
+   exactly this test (`usb_capture_session3/g615lr_priming_then_static_hold.ps1`)
+   — real priming sequence via `HidSend.cs` directly, bypassing Armoury
+   Crate's GUI entirely, then one unchanging zone streamed continuously.
+   Methodologically clean run (reset to a confirmed-dark baseline first,
+   watched it go from dark to lit with nothing else touching the
+   hardware): **it worked, the zone visibly lit up.** So a single static
+   zone is sufficient in principle — cross this off the list, the gap on
+   Linux is something else. See `HANDOFF.md` "Windows session 3" for full
+   details, including an unrelated but major discovery made the same
+   session: this repo's zone map had 6 of 16 wire IDs wrong (found via
+   ASUS's own Aura Creator device-profile CSV, now in
+   `usb_capture_session3/ground_truth/WDL_G615LR.csv`) — doesn't change
+   the wire bytes any existing Linux test sent, but worth cross-checking
+   `Lightbar2025Zone`'s variant names against that file rather than prose.
+
 3. **Does `SET_IDLE` on interface 1 succeed on Windows?** On Linux it
    consistently comes back `STALL`/`Err(Pipe)` in every test (interface
    0's `SET_IDLE` succeeds fine). Probably benign, but never independently

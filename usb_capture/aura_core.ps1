@@ -11,10 +11,27 @@
     be moved anywhere (or copied out of the temp scratchpad) without editing
     any paths.
 
-    VERIFIED MAPPING -- zone names, physical mapping, and swap table below
-    were confirmed by live, single-zone-isolation testing on real hardware.
-    Do not "fix" any of it without re-testing. See README.md for the full
-    writeup, including the known swap-table instability caveat.
+    ZONE MAP CORRECTED 2026-07-23 (Windows session 3) against
+    `usb_capture_session3/ground_truth/WDL_G615LR.csv` -- the OFFICIAL ASUS
+    Aura Creator device-layout file for this exact laptop (grid + physical
+    x/y/z coordinates + lamp_id, pulled straight from Aura Creator's own
+    per-device profile, not re-derived empirically). Confirmed by a live
+    controlled test the same session: sent wire zone 0x06, the physically
+    WRONG corner lit up under the previous map, exactly matching what this
+    ground-truth file said 0x06 actually is. The back-edge zones (0x04-0x07)
+    and the left sidebar's front/back split (0x09/0x0B) were wrong in every
+    previous version of this map -- likely the real explanation for a chunk
+    of this whole project's long-standing "flip-flop" zone/colour
+    instability, not just noise. Keyboard (0x00-0x03), 0x08, 0x0A, and the
+    front edge (0x0C-0x0F) all checked out already correct. See HANDOFF.md
+    "Windows session 3" for the full derivation.
+
+    Previously this file used a confusing two-hop indirection (physical
+    name -> "internal" name -> wire ID) to keep empirically-confirmed wire
+    IDs separate from physical-position assumptions. Now that we have an
+    authoritative ground-truth source instead of empirical guessing, that
+    indirection is gone -- $PHYSICAL_ZONES below maps physical name straight
+    to wire ID.
 #>
 
 $script:AuraCoreDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -23,37 +40,31 @@ Add-Type -Path (Join-Path $script:AuraCoreDir "HidSend.cs")
 $AURA_VID = 0x0B05
 $AURA_PID = 0x19B6
 
-# Internal zone name -> USB wire zone ID. Raw hardware addressing.
-$INTERNAL_ZONES = [ordered]@{
-    kbd1 = 0x00; kbd2 = 0x01; kbd3 = 0x02; kbd4 = 0x03
-    back_bar_left = 0x04; back_bar_right = 0x05
-    corner_tl = 0x06; corner_tr = 0x07
-    left_sidebar_back = 0x08; left_sidebar_front = 0x09
-    right_sidebar_front = 0x0A; right_sidebar_back = 0x0B
-    corner_br = 0x0C; corner_bl = 0x0D
-    front_bar_right = 0x0E; front_bar_left = 0x0F
-}
-
 # Physical location (what you actually address, standing in front of the
-# laptop) -> internal zone name. CONFIRMED by live isolation testing.
-$PHYSICAL_MAP = [ordered]@{
-    left_bar_front  = "left_sidebar_front"    # 0x09
-    left_bar_back   = "right_sidebar_back"    # 0x0B
-    right_bar_front = "right_sidebar_front"   # 0x0A
-    right_bar_back  = "left_sidebar_back"     # 0x08
+# laptop) -> raw USB wire zone ID. Source of truth:
+# usb_capture_session3/ground_truth/WDL_G615LR.csv (ASUS's own Aura Creator
+# device profile for this exact laptop model).
+$PHYSICAL_ZONES = [ordered]@{
+    kbd1 = 0x00; kbd2 = 0x01; kbd3 = 0x02; kbd4 = 0x03
 
-    front_left  = "front_bar_left"            # 0x0F
-    front_right = "front_bar_right"           # 0x0E
-    back_left   = "back_bar_left"             # 0x04
-    back_right  = "back_bar_right"            # 0x05
+    back_left  = 0x05   # was wrongly 0x04 in every prior version
+    back_right = 0x04   # was wrongly 0x05 in every prior version
+    back_corner_left  = 0x07   # was wrongly 0x06 in every prior version
+    back_corner_right = 0x06   # was wrongly 0x07 in every prior version
 
-    back_corner_left   = "corner_tl"          # 0x06
-    back_corner_right  = "corner_tr"          # 0x07
-    front_corner_left  = "corner_bl"          # 0x0D
-    front_corner_right = "corner_br"          # 0x0C
+    right_bar_back  = 0x08
+    left_bar_back   = 0x09   # was wrongly "left_bar_front" in every prior version
+    right_bar_front = 0x0A
+    left_bar_front  = 0x0B   # was wrongly "left_bar_back" in every prior version
 
-    kbd1 = "kbd1"; kbd2 = "kbd2"; kbd3 = "kbd3"; kbd4 = "kbd4"
+    front_corner_right = 0x0C
+    front_corner_left  = 0x0D
+    front_bar_right = 0x0E
+    front_bar_left  = 0x0F
 }
+
+# Back-compat alias -- old scripts/callers may still reference $PHYSICAL_MAP.
+$PHYSICAL_MAP = $PHYSICAL_ZONES
 
 # Zones that do NOT use the G/R channel swap -- take plain RGB directly.
 # Single source of truth now; previously duplicated (and had drifted out of
@@ -83,11 +94,10 @@ function ConvertFrom-HexColor {
 # Physical name -> raw wire zone ID. Throws on unknown name.
 function Resolve-PhysicalZone {
     param([Parameter(Mandatory)][string]$PhysicalName)
-    if (-not $PHYSICAL_MAP.Contains($PhysicalName)) {
+    if (-not $PHYSICAL_ZONES.Contains($PhysicalName)) {
         throw "Unknown physical zone: $PhysicalName"
     }
-    $internalName = $PHYSICAL_MAP[$PhysicalName]
-    return $INTERNAL_ZONES[$internalName]
+    return $PHYSICAL_ZONES[$PhysicalName]
 }
 
 # Builds the 51-byte HID Feature report payload for a single zone/color pair.

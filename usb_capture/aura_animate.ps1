@@ -36,7 +36,7 @@ param(
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $scriptDir "aura_core.ps1")
 
-$ZONES = @($INTERNAL_ZONES.Values)
+$ZONES = @($PHYSICAL_ZONES.Values)
 
 # --- Effects -----------------------------------------------------------
 # Each effect: next_colour_state(tick, zoneIndex) -> @{r;g;b}

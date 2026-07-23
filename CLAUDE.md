@@ -85,16 +85,24 @@ to confirm it's pure noise, then `git checkout -- .` to clear it. Prefer
 `git pull` over any other transfer method going forward to avoid this
 entirely.
 
-## Current state (as of the commit that added this file — check `git log` for anything newer)
+## Current state (check `git log` for anything newer than this)
 
 - ✅ Basic whole-chassis colour/effect control via the classic `0x5d`
   protocol: **shipped and working**, 5 of 12 built-in modes confirmed live
   (`Static`, `Breathe`, `RainbowCycle`, `RainbowWave`, `Pulse`), the other
   7 confirmed as a real firmware limitation on this specific board (not a
-  bug — see `HANDOFF.md` session 3 for the ACK-comparison evidence).
+  bug — see `HANDOFF.md` Linux session 3 for the ACK-comparison evidence).
 - ❌ Independent per-zone control via `0x04`: **not yet working on Linux**,
-  actively being investigated, real progress made (found and replicated
-  the exact real pre-`0x04` priming sequence, confirmed it triggers a real
-  hardware reaction) but the actual colour-write still doesn't stick. See
-  `HANDOFF.md` session 3 Part B and `QUESTIONS.md` for exactly where this
-  stands and what's needed next.
+  but a real single unchanging zone/colour, streamed continuously after
+  real priming, **is now confirmed sufficient on Windows** (Windows
+  session 3 answered `QUESTIONS.md` Q2 — zone variety is not required).
+  So the remaining Linux gap is something else, not "needs more zones."
+  See `HANDOFF.md` Windows session 3 and Linux session 3 Part B.
+- ⚠️ **This repo's zone map had 6 of 16 wire IDs wrong** (the back edge,
+  `0x04-0x07`, and the left sidebar's front/back split, `0x09`/`0x0B`) —
+  corrected in Windows session 3 against `usb_capture_session3/ground_truth/WDL_G615LR.csv`,
+  ASUS's own official Aura Creator device profile for this laptop. Doesn't
+  change any wire bytes already sent by existing code/tests (a wire ID of
+  `0x06` was always `0x06` regardless of what it was labeled), but if
+  anything references zone names by their *old* labels rather than the hex
+  ID, re-check it against that CSV, not against older prose in this repo.

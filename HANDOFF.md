@@ -757,5 +757,143 @@ entirely, so timing is fully under script control), immediately followed
 by one unchanging zone/color streamed continuously for 60+ seconds (long
 enough to rule out "8 seconds wasn't long enough" outright), with a live
 USBPcap capture running the whole time and the human watching the
-physical zone to report exactly when/whether it visibly changes. Results
-to follow in this same section or a new one once it's run.
+physical zone to report exactly when/whether it visibly changes.
+
+## Windows session 3 — Q2 answered (yes, a single static zone works), and the real zone map was hiding in ASUS's own installed software
+
+Written 2026-07-23. Continuation of session 1's in-progress test, plus an
+unrelated but major discovery made digging through installed ASUS
+software while waiting.
+
+### The Q1/Q2 controlled test: ran, real result, packet capture never worked
+
+`usb_capture_session3/g615lr_priming_then_static_hold.ps1` — sends the
+exact priming sequence from session 1's table (`0x0201`, `0x5d`
+`b3`/`b4`/`b5`, `0x0305`, all via `HidSend.cs` directly, bypassing Armoury
+Crate's GUI entirely) then streams **one unchanging zone/colour**
+continuously for up to 90 seconds.
+
+**Result, methodologically clean (reset the zone to black first, human
+watched a confirmed-dark baseline, then ran the script, confirmed it went
+from dark to lit with nothing else touching the hardware in between)**:
+**the zone visibly lit up.** This directly answers `QUESTIONS.md` Q2 --
+**a single static zone streamed continuously, following real priming,
+does resolve to a visible colour on Windows.** Zone variety/cycling is
+*not* required. If Linux's equivalent test (`g615lr-prime-then-stream.rs`)
+still doesn't work with a single static zone, the remaining gap is
+something else -- environment, exact byte-level difference, or something
+not yet identified -- not "needs zone variety," which can be crossed off
+the "for whoever picks this up next" list in the earlier session-3 Linux
+section above.
+
+**Q1 (precise latency) was not cleanly answered.** The intent was to
+correlate a live USBPcap capture against the exact moment of the visible
+change. That capture **never worked, across many attempts** -- root cause
+turned out to be picking the capture interface by numeric index (`tshark
+-i 7`), which is **not stable**: interface numbers shift as other adapters
+(VPNs, virtual switches, Bluetooth devices) connect/disconnect, confirmed
+directly when an elevated capture explicitly requested as `-i 7` came back
+`Capturing on 'Wi-Fi 2'` instead of `USBPcap1`. **Always select USBPcap by
+its literal name** (`-i "\\.\USBPcap1"`), never by index, on this machine
+--this cost most of this session's real time. Even after fixing that, no
+capture actually landed correctly correlated with a successful visible-change
+run before this section was written -- Q1 is still open for whoever
+continues this.
+
+### The bigger discovery: ASUS's own software already has the real zone map
+
+While waiting between test runs, went looking through installed ASUS
+software (`C:\ProgramData\ASUS`, `C:\Program Files\ASUS`,
+`C:\Program Files (x86)\ASUS`) for anything that might describe the
+chassis lightbar's real protocol or layout, since none of this has ever
+been vendor-documented.
+
+`RogAura30`'s own device-capability files (`GetDeviceCap.xml`,
+`GetDeviceStatus.xml`, `GetDeviceStatusNew.xml`) turned out to be a dead
+end for this purpose -- they only know about the 4-zone keyboard
+(`WDL_NB_KB_4ZONE_RGB_LIGHTING`) and a virtual "WallPaper" software
+lighting group. The 12-zone chassis lightbar isn't registered as a device
+in that SDK's model *at all* on this machine, and `GetDeviceStatus.xml`'s
+`effect_path_order` list shows a formal `LightBar` device-type category
+existing in ASUS's schema with `order=-1` (present in the schema, not
+actually registered/active here) -- consistent with the chassis lightbar
+being handled by something outside Armoury Crate's normal RogAura30-based
+device pipeline entirely.
+
+That "something else" is **Aura Creator**, a separate UWP app mentioned
+all the way back at the very start of this whole investigation (the
+original human request referenced an "Aura Creator XML dump"). Its package
+data lives at
+`C:\Users\<user>\AppData\Local\Packages\B9ECED6F.AURACreator_qmba6cd70vzyy\LocalState\Devices\`,
+and inside it, a folder literally named `G615` contains
+**`WDL_G615LR.csv`** -- ASUS's own official per-device zone layout profile
+for this exact laptop model, straight from Aura Creator's own device
+configuration, not reverse-engineered or empirically derived. Copied into
+this repo at `usb_capture_session3/ground_truth/WDL_G615LR.csv`.
+
+The CSV is an 8-column x 5-row physical grid (`GridWidth`/`GridHeight`,
+real `phy_x`/`phy_y` coordinates in what's presumably cm, matching
+`PhyWidth=35.4`/`PhyHeight=26.4`) with a `lamp_id` column per populated
+cell. Decoding it (full derivation: physical y=0 row is the back/hinge
+edge since it's closest to the keyboard row, which sits at `phy_y=9.9`,
+about 37% of the way down from the back edge -- consistent with normal
+laptop ergonomics; `lamp_id` values 0-3 land exactly on 4 evenly-spaced
+positions in that keyboard row, confirming `lamp_id` uses the *same
+numbering* as this repo's known 0x00-0x0F wire zone IDs) against
+`aura_core.ps1`'s zone map (as it stood before this session) found six
+zones were wrong:
+
+| Wire ID | This repo previously claimed | **Ground truth (ASUS's own file)** |
+|---|---|---|
+| `0x04` | back_bar_**left** | back_bar_**right** |
+| `0x05` | back_bar_**right** | back_bar_**left** |
+| `0x06` | back_corner_**left** | back_corner_**right** |
+| `0x07` | back_corner_**right** | back_corner_**left** |
+| `0x09` | left_bar_**front** | left_bar_**back** |
+| `0x0B` | left_bar_**back** | left_bar_**front** |
+
+Keyboard (`0x00-0x03`), `0x08`, `0x0A`, and the entire front edge
+(`0x0C-0x0F`) were already correct. **This exactly explains this session's
+own test result**: sent wire zone `0x06` expecting `back_corner_left`
+(per the old map), the *physically correct* `back_corner_right` lit up
+instead -- a perfect match against this ground-truth file, independently
+confirmed live before the CSV was even found. This is very likely a real
+contributor to a chunk of this whole project's long-running "zone/colour
+flip-flop instability" that was never conclusively explained across
+multiple earlier sessions (both this repo's and the original Windows
+investigation before it existed) -- not necessarily the *whole*
+explanation (the R/G channel swap question is a separate axis from zone
+ID), but a genuine, previously-unknown source of confusion layered on top
+of it.
+
+**Fixed as of this session**: `usb_capture/aura_core.ps1`'s zone map
+(collapsed the old confusing two-hop `$PHYSICAL_MAP` -> `$INTERNAL_ZONES`
+indirection into a single direct `$PHYSICAL_ZONES` physical-name -> wire-ID
+table, sourced straight from the CSV, with the six corrected entries
+called out inline), `aura_control.ps1`/`aura_animate.ps1` (updated to use
+the renamed/restructured table), and
+`usb_capture_session3/draw_zone_map.py`/`g615lr_zone_map.png` (the
+labeled zone diagram, regenerated with corrected positions).
+
+**Not yet done, worth doing**: the `$NO_SWAP_ZONES` G/R-swap table in the
+same file was never re-verified against this corrected zone map -- it was
+originally derived through testing that had the wrong zone-ID assumptions
+baked in, so it's plausible some of *those* results were actually testing
+a different physical zone than believed at the time. Re-verifying swap
+behaviour per zone against the now-correct map (Red/Green only, per the
+existing methodology) is a reasonable next step if colour-channel issues
+come up again.
+
+**For Linux**: `usb_capture_session3/ground_truth/WDL_G615LR.csv` is now
+in this repo -- pull it. If `rog-aura::lightbar_2025`'s `Lightbar2025Zone`
+enum or any test binary encodes physical zone assumptions (variant names
+like `BackBarLeft`/`SideLeftBack` were inherited from the same originally-
+wrong map), cross-check them against this file rather than against prose
+in this doc. Also note: the *wire byte values* sent by any existing Linux
+test were never wrong (a wire ID of `0x06` is `0x06` regardless of what a
+human calls it) -- this bug only affected human-readable labels/interpretation
+of results, not actual protocol bytes on either OS, so it doesn't by
+itself explain why Linux's own zone writes still produce zero visible
+effect. What it does provide: an authoritative, first-party-sourced zone
+table to build from, and a clean confirmation (see Q2 above) that a single
+static zone is sufficient in principle.

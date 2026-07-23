@@ -33,10 +33,8 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $scriptDir "aura_core.ps1")
 
 if ($List) {
-    $PHYSICAL_MAP.GetEnumerator() | ForEach-Object {
-        $internal = $_.Value
-        $hexId = $INTERNAL_ZONES[$internal]
-        Write-Output ("{0,-20} -> {1,-20} 0x{2:X2}" -f $_.Key, $internal, $hexId)
+    $PHYSICAL_ZONES.GetEnumerator() | ForEach-Object {
+        Write-Output ("{0,-20} -> 0x{1:X2}" -f $_.Key, $_.Value)
     }
     exit 0
 }
@@ -66,7 +64,7 @@ for ($i = 0; $i -lt $Zone.Count; $i++) {
 }
 
 # Send ONE zone per packet (safe, avoids any cross-zone packet issues)
-foreach ($zid in $INTERNAL_ZONES.Values) {
+foreach ($zid in $PHYSICAL_ZONES.Values) {
     $c = if ($requested.Contains($zid)) { $requested[$zid] } else { @{r=0;g=0;b=0} }
     $packet = Build-AuraPacket -Zone $zid -R $c.r -G $c.g -B $c.b
     [HidSend]::TrySetFeature($targetPath, $packet) | Out-Null
@@ -75,7 +73,6 @@ foreach ($zid in $INTERNAL_ZONES.Values) {
 Write-Output ""
 Write-Output "Lit zones:"
 for ($i = 0; $i -lt $Zone.Count; $i++) {
-    $internalName = $PHYSICAL_MAP[$Zone[$i]]
-    $hexId = $INTERNAL_ZONES[$internalName]
-    Write-Output "  $($Zone[$i]) -> $internalName (0x$('{0:X2}' -f $hexId)) = $($Color[$i])"
+    $hexId = $PHYSICAL_ZONES[$Zone[$i]]
+    Write-Output "  $($Zone[$i]) (0x$('{0:X2}' -f $hexId)) = $($Color[$i])"
 }
