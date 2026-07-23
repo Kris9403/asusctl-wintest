@@ -897,3 +897,32 @@ itself explain why Linux's own zone writes still produce zero visible
 effect. What it does provide: an authoritative, first-party-sourced zone
 table to build from, and a clean confirmation (see Q2 above) that a single
 static zone is sufficient in principle.
+
+### Extra context: ASUS's own software doesn't fully support this device either
+
+Digging a bit further, `AppData\Local\Packages\B9ECED6F.AURACreator_qmba6cd70vzyy\LocalState\DebugLog_2026-07-23.log`
+(Aura Creator's own live debug log, from earlier today) shows the app's
+device list reporting, for the `G615LR` entry specifically: `AURA Kit : 0`,
+`HAL : 0` (both zero/absent -- contrast with the `WallPaper` device in the
+same list, which shows `AURA Kit : 1` and real version numbers), and the
+UI repeatedly triggers a `[MaskManager] ShowMask type : NoSupportDevice`
+mask for this laptop's device entry specifically.
+
+Reading: Aura Creator's own official support plugin/HAL for this exact
+laptop model isn't currently installed, and the app's own UI actively
+flags it as an unsupported device. This isn't a new mechanism or a fix --
+it's confirmation/context for something already suspected since the very
+start of this investigation ("genuinely undocumented, no vendor
+documentation exists"). It does *not* block this repo's approach (which
+never goes through Aura Creator's gated pipeline, only raw HID writes),
+but it's worth knowing that even ASUS's own consumer software doesn't
+consider this laptop's chassis lightbar fully supported yet -- so "vendor
+docs will eventually cover this" isn't something to wait on.
+
+`LastScript.xml` (Aura Creator's last-saved effect script) independently
+cross-validates the ground-truth CSV: it references LEDs by the CSV's row
+index (e.g. `led key="6"`), and `WDL_G615LR.csv`'s "LED 6" row is
+`lamp_id=4` (`back_bar_right` per the corrected map) -- consistent with
+everything above, no new information beyond confirming the CSV's row
+numbering is the same numbering Aura Creator's own script format uses
+internally.
