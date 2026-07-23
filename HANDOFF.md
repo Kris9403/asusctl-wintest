@@ -678,3 +678,84 @@ order:
    complete interrupt-IN timeline during the stream itself, not just
    immediately after — may reveal periodic traffic during sustained
    streaming that a short single-shot check would miss.
+
+## Windows session 1 — closed the missing-`usb_capture` gap, answered Q3/Q5, exact priming-sequence timing
+
+Written 2026-07-23. Picked this up via a human relaying messages between the
+two sessions (no direct channel), then switched to working from this repo
+directly once it existed.
+
+**Housekeeping fix**: `usb_capture/` (the original session-1 raw data —
+`aura.pcap` and friends, `aura_control.ps1`/`aura_animate.ps1`/
+`HidSend.cs`, every `.pcap`/`.pcapng`) had never actually been committed to
+this repo, despite being referenced constantly throughout this file and
+`QUESTIONS.md` — it only ever existed as a local-only copy on each machine
+from an earlier ad-hoc Drive/zip handoff, which quietly broke the "git is
+the only shared channel" model `CLAUDE.md` describes. Added and pushed
+(`1eb3410b`). If anything in it looks different from what you remember
+using locally (timestamps, an extra file, whatever) — that's expected, fix
+it forward in a new section rather than treating this one as wrong; this
+was reconstructed from a local scratch copy, not guaranteed byte-identical
+to whatever copy Linux sessions 1-3 were actually reading from.
+
+**Q3 answered, no new test needed**: already had this in an existing
+capture. `SET_IDLE` on interface 1 **succeeds** on Windows
+(`USBD_STATUS_SUCCESS`) — doesn't `STALL` the way it consistently does on
+Linux. Real platform difference, not something to wave off as benign
+without checking, which is exactly why the question was worth asking.
+
+**Q5 answered, no new test needed**: `aura_control.ps1` opens a fresh HID
+handle per write; `aura_animate.ps1` holds one persistent handle for an
+entire session. Both are confirmed working live, on real hardware, for
+real color control (`aura_animate.ps1`'s persistent handle exists for
+*performance* at 20-30fps, per its own code comment calling per-frame
+handle churn "wasteful" — not because the churn broke correctness). Handle
+lifecycle is very unlikely to be the `0x04` blocker.
+
+**Exact priming-sequence bytes and timing, pulled directly from
+`aura.pcap` via `tshark` (not re-typed from prose)**:
+
+```
+t=7.791911  SET_IDLE  iface 1
+t=7.791934  SET_IDLE  iface 0
+t=7.793118  SET_REPORT 0x0201  "01 01"                                    iface 0
+  ── ~4.08s gap ──
+t=11.875611 SET_REPORT 0x025d  "5d b3 00 02 00 00 00 eb 00...(64B)"       iface 0
+t=11.877360 SET_REPORT 0x025d  "5d b4 00 00...(64B, all zero after b4)"   iface 0
+t=11.879505 SET_REPORT 0x025d  "5d b5 00 00...(64B, all zero after b5)"   iface 0
+t=11.916336 SET_REPORT 0x0305  "05 00 08 00 0f 00 00 00 00 01"            iface 1
+t=11.917548 SET_REPORT 0x0304  <first real write, 8-zone batch>           iface 1
+t=12.690948 SET_REPORT 0x0304  <second write>                             iface 1
+t=12.938433 SET_REPORT 0x0304  <third write>                              iface 1
+```
+
+Confirms the `b3`/`b4`/`b5` bytes Linux session 3 extracted are exactly
+right (independently re-derived, not just trusted). New information this
+adds: **the gap from the last priming packet (`0x0305`) to the first real
+`0x0304` write is ~1.2 milliseconds** — essentially immediate, no
+deliberate delay. The gap from `b3` (first priming write) to the first
+color write is ~42ms total. Steady-state write cadence after that is
+roughly 250-770ms between writes (matches the earlier "200-800ms"
+estimate). **This weakens the "Linux just didn't wait long enough" theory**
+— if real Windows needs ~0ms of settle time between the last priming
+packet and a working color write, an 8-second Linux stream timing out
+unresolved is unlikely to be explained by "priming needs more time to take
+effect internally"; if it were a pure timing/settle issue you'd expect
+Windows to need a real gap too, and it doesn't.
+
+Also worth flagging: the first real `0x0304` write is an **8-zone batched
+packet** (`04 08 01 00 00 01 00 02 00 03 00 04 00 05 00 06 00 07 00 ...`),
+not a single-zone write. Every Linux test so far (per `QUESTIONS.md` Q2)
+streamed one static single zone. Combined with the "does zone variety
+matter" open question, this is one more data point toward testing with
+real multi-zone batches instead of a lone zone — worth trying before or
+alongside the single-zone Q1/Q2 test below.
+
+**In progress**: a controlled Q1+Q2 test — replay this exact priming
+sequence via `HidSend.cs` directly (bypassing Armoury Crate's GUI
+entirely, so timing is fully under script control), immediately followed
+by one unchanging zone/color streamed continuously for 60+ seconds (long
+enough to rule out "8 seconds wasn't long enough" outright), with a live
+USBPcap capture running the whole time and the human watching the
+physical zone to report exactly when/whether it visibly changes. Results
+to follow in this same section or a new one once it's run.
