@@ -152,15 +152,38 @@ impl HidRaw {
     /// layout used for the Windows `HidD_SetFeature` call this mirrors.
     pub fn set_feature_report(&self, report: &[u8]) -> Result<()> {
         let mut buf = report.to_vec();
-        if let Ok(file) = self.file.try_borrow() {
-            unsafe { hidiocsfeature(file.as_raw_fd(), &mut buf) }.map_err(|errno| {
-                PlatformError::IoPath(
-                    self.devfs_path.to_string_lossy().to_string(),
-                    std::io::Error::from(errno),
-                )
-            })?;
-        }
+        let file = self.file.borrow();
+        let n = unsafe { hidiocsfeature(file.as_raw_fd(), &mut buf) }.map_err(|errno| {
+            PlatformError::IoPath(
+                self.devfs_path.to_string_lossy().to_string(),
+                std::io::Error::from(errno),
+            )
+        })?;
+        info!(
+            "set_feature_report on {}: sent {} bytes, kernel reported {} bytes transferred",
+            self.devfs_path.to_string_lossy(),
+            buf.len(),
+            n
+        );
         Ok(())
+    }
+
+    /// Open a specific hidraw device node directly, bypassing
+    /// `idProduct`-based enumeration. `HidRaw::new` returns the *first*
+    /// hidraw node matching `id_product`, which is ambiguous for devices
+    /// exposing multiple HID interfaces under one `idProduct` (e.g. the
+    /// G615LR: `/dev/hidraw1` is `bInterfaceNumber 00`, `/dev/hidraw2` is
+    /// `01` -- only one of them carries a given report ID). Use this once
+    /// you've identified the right node yourself, e.g. via `udevadm info -a
+    /// -n /dev/hidrawN | grep bInterfaceNumber`.
+    pub fn from_devnode(devnode: &std::path::Path, id_product: &str) -> Result<Self> {
+        Ok(Self {
+            file: RefCell::new(OpenOptions::new().read(true).write(true).open(devnode)?),
+            devfs_path: devnode.to_owned(),
+            prod_id: id_product.to_owned(),
+            syspath: PathBuf::new(),
+            _device_bcd: 0,
+        })
     }
 
     /// This method was added for certain devices like AniMe to prevent them

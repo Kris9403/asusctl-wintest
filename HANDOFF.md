@@ -3,10 +3,13 @@
 Written on Windows, for whoever (human or a fresh Claude session with no
 memory of the Windows conversation) continues this on the actual Linux boot.
 If you're an AI reading this cold: read this whole file before touching
-anything, then read `docs/g615lr-aura-protocol.md` for the full protocol
-writeup. Don't re-derive any of this from scratch — it's already been
-reverse-engineered and live-tested on real hardware (on Windows; this repo's
-new Linux code has never run).
+anything — **especially the "Linux session 1" update at the bottom, which
+supersedes several claims above** — then read
+`docs/g615lr-aura-protocol.md` for the full protocol writeup. Don't
+re-derive any of this from scratch — it's already been reverse-engineered
+and live-tested on real hardware (on Windows; the Linux code below has now
+compiled and been extensively hardware-tested, see bottom of file, but
+still doesn't produce a visible effect — that's the live open problem).
 
 ## What this is
 
@@ -175,3 +178,254 @@ over the Windows one; Linux removes the Armoury Crate variable entirely.
   everything discovered this whole investigation — more narrative detail
   than `docs/g615lr-aura-protocol.md`, which is the trimmed-for-upstream
   version.
+
+## Linux session 1 update — compiles clean, hardware-tested extensively, still no visible effect
+
+Everything in "Step 1" above is now done and passed on the real
+`G615LR` (`cargo check -p rog_platform -p rog_aura -p asusd`, plus
+`cargo test -p rog_aura lightbar_2025` — all green, first try, none of the
+predicted suspects hit). The compiled `asusd` was installed as the live
+system daemon (`/usr/bin/asusd`, backup at `/usr/bin/asusd.bak-6.3.7`) and
+runs stably. **Currently stopped** (`sudo systemctl stop asusd` — it's a
+system service, not a user one) as part of debugging; restart with
+`sudo systemctl start asusd` if normal daemon function is wanted back.
+
+Two real (non-cosmetic) code changes landed in `rog-platform/src/hid_raw.rs`
+beyond what's described in "Step 1"/"docs" above:
+- `set_feature_report` used to silently no-op on a failed `try_borrow()`
+  instead of erroring — changed to `.borrow()` (panics loudly on conflict
+  instead of lying about success). Found by inspection, not yet actually
+  triggered by anything.
+- Added `HidRaw::from_devnode(path, id_product)` — opens a specific
+  `/dev/hidrawN` directly, bypassing `HidRaw::new`'s first-match ambiguity.
+  Needed because this laptop has two hidraw nodes under the same
+  `idProduct` (`/dev/hidraw1` = `bInterfaceNumber 00`, `/dev/hidraw2` =
+  `01`) and `new()` can't tell them apart.
+
+Five throwaway test binaries live in `rog-platform/examples/` (all built
+and confirmed compiling; run any with
+`sudo target/debug/examples/<name>`, needs root for raw hidraw/USB access):
+
+- `g615lr-lightbar-test.rs` — sends one hand-built zone/color packet via
+  `HidRaw::set_feature_report` (the `HIDIOCSFEATURE` ioctl path).
+- `g615lr-replay-capture.rs` — same, but the packet bytes are the *literal*
+  bytes extracted from `usb_capture/aura.pcap` (a real, visually-confirmed
+  Windows capture), not re-derived from the docs — rules out any
+  transcription bug in the packet builder.
+- `g615lr-raw-usb-test.rs` — bypasses the kernel HID subsystem entirely:
+  detaches the `hid_asus` kernel driver from interface 1 via `rusb`
+  (libusb) and sends the same captured packet as a raw USB control
+  transfer, matching Windows' `HidD_SetFeature` at the wire level exactly
+  (`bmRequestType=0x21, bRequest=0x09, wValue=0x0304, wIndex=1`).
+- `g615lr-with-handshake.rs` — same raw-USB approach, but first sends a
+  previously-undocumented **Feature report ID `0x05`** (10 bytes) that was
+  found in `aura.pcap` immediately preceding the first `0x04` packet of
+  that capture session — on the theory it's a one-time "enable custom
+  lighting" handshake. Payload used: `05 00 08 00 0f 00 00 00 00 01`.
+- `g615lr-hold-test.rs` — resends the zone packet continuously for 6
+  seconds at ~50fps via raw USB, mimicking Armoury Crate's continuous
+  streaming, to rule out "one-shot packet gets overwritten by the next
+  frame of a competing animation."
+
+**Result: every single one of the above produces zero visible hardware
+effect.** Not "wrong color" — literally nothing changes, ever, on any
+zone tried (`Keyboard1`, zone `0x06` back-left corner). This holds on both
+an actively-animating rainbow baseline and a static-orange baseline (mode
+was changed via a physical hotkey mid-session — confirms an EC-firmware
+default owns these LEDs independent of any host software, since no OS-side
+tool caused that change).
+
+What's been **definitively ruled out** as the cause, each independently
+verified:
+1. **Packet content wrong** — `g615lr-replay-capture.rs` sends literal
+   captured-good bytes, byte-for-byte. Also independently confirmed the
+   zone/color offset layout (bytes 3-4 zone ID, byte 19+ color) against
+   `aura.pcap` using a small Python parser — matches
+   `build_lightbar_2025_packet` exactly.
+2. **Wrong report length** — pulled the *live* HID report descriptor
+   straight from this exact hardware
+   (`/sys/bus/hid/devices/0003:0B05:19B6.*/report_descriptor`, hand-parsed
+   the HID item stream) and confirmed report ID `0x04` really is declared
+   as 51 bytes (50 data + 1 ID) and report `0x05` as 10 bytes, matching
+   what's sent exactly.
+3. **Wrong interface / first-match ambiguity** — tried both
+   `/dev/hidraw1` (`bInterfaceNumber 00`) and `/dev/hidraw2` (`01`)
+   explicitly via `from_devnode`; also confirmed via `udevadm` that `01`
+   is genuinely `MI_01`, matching the docs.
+4. **`HIDIOCSFEATURE`/hidraw-specific transport bug** — bypassed entirely
+   via raw `libusb` control transfers (`g615lr-raw-usb-test.rs`), same
+   null result.
+5. **`hid_asus` kernel driver intercepting/filtering the report** — this
+   device binds to the in-tree `hid_asus` driver, not generic
+   `hid-generic` (`/sys/bus/hid/devices/*/driver` → `asus`). Detached it
+   via `rusb::detach_kernel_driver` before sending raw USB — no change.
+6. **Missing one-time init/handshake** — found and tried sending report
+   `0x05` first (see above) — no change.
+7. **Competing continuous animation overwriting a one-shot write** — tried
+   continuous 6-second streaming at ~50fps — no change. Also tried on a
+   static (non-animating) baseline — still no change.
+8. **`asusd` (or anything else on this box) fighting for the device** —
+   confirmed `asusd` stopped (`systemctl is-active` → `inactive`) during
+   the later tests — no change.
+
+**Leading unresolved theory**: some ASUS-specific ACPI/WMI-level "hand
+control to host" call that Armoury Crate's background service issues once
+(on Windows this needed `ArmourySwAgent`/`LightingService`/etc. to be
+*running*, just set to "Dark mode" — never fully closed — during all
+original successful testing, which is exactly consistent with this). Real
+findings so far, not just speculation:
+- `usb_capture/probe_wmi.ps1` / `probe_wmi2.ps1` reference ASUS's generic
+  ATK WMI class `AsusAtkWmi_WMNB` with `DSTS`/`DEVS` methods and candidate
+  device IDs (`LIGHTBAR 0x00050025`, `TUF_RGB_MODE 0x00100056`,
+  `TUF_RGB_MODE2 0x0010005A`, `TUF_RGB_STATE 0x00100057`) — these were
+  *guessed* from other ASUS models' known IDs, never confirmed for
+  `G615LR` specifically.
+- `usb_capture/wmitrace.etl`/`.xml` (an attempted Windows ETW capture of
+  this) is a dead end — only 99 generic session-header events, zero actual
+  `Asus`/`WMNB` activity captured. Armoury Crate most likely talks to the
+  ATK ACPI device via a direct IOCTL, not through the traced WMI service
+  layer, so this file doesn't help.
+- The underlying ACPI method **does exist** on this exact machine: decompiled
+  the live DSDT (`sudo acpidump -b` + `iasl -d`) and found
+  `\_SB.ATKD.WMNB(Arg0, Arg1, Arg2)` — a `Serialized` method dispatching on
+  a 4-byte code in `Arg1` (`0x54494E49`="INIT", `0x53545344`="DSTS",
+  `0x53564544`="DEVS", plus others), with `Arg2` a 20-byte buffer
+  (`CreateDWordField` into `IIA0..IIA4`) — `IIA0` is the device ID. This
+  matches the Linux `asus_wmi` driver's own known internal convention
+  exactly (same dispatch shape it uses for e.g. `KBD_BACKLIGHT`).
+- Installed `acpi-call-dkms` and probed `DSTS` (read-only status query,
+  `Arg1=0x53545344`, `IIA0=<device id>`) for all four candidate lighting
+  IDs above, **plus `KBD_BACKLIGHT (0x00050021)` as a sanity check** since
+  that ID is confirmed working today via the existing
+  `/sys/class/leds/asus::kbd_backlight` sysfs control (driven by the
+  in-tree `asus_wmi` kernel driver, which must be calling this exact same
+  ACPI method successfully under the hood). **All five, including the
+  known-working sanity check, returned `0xFFFFFFFE`** — ASUS's own
+  standard "unsupported device ID" sentinel. This is ambiguous: either
+  none of these IDs are real on this firmware (plausible for the 4 guessed
+  ones, **not plausible for `KBD_BACKLIGHT`**), or the raw `acpi_call`
+  invocation has an encoding bug (wrong arg width/type, or `acpi_call`
+  not respecting the method's `Serialized` locking) that makes every call
+  fail before it even reaches the `IIA0` comparison. Getting the
+  known-working ID to also come back "unsupported" points at #2, but this
+  was not resolved before pausing.
+
+**Concrete next steps, in order of likely value**:
+1. Get a **fresh Windows USB *and* WMI capture bracketing the actual
+   handoff moment** — cold boot or a fresh Armoury Crate launch from a
+   state where lighting is EC-owned (not just color changes within an
+   already-controlled session, which is all every existing capture in
+   `usb_capture/` shows). This is the one thing no existing artifact
+   covers and would directly confirm or kill the WMI-handoff theory.
+2. Debug the `acpi_call` encoding until `KBD_BACKLIGHT`'s `DSTS` probe
+   returns something other than `0xFFFFFFFE` (a real status value) —
+   proves the call mechanism itself works, at which point the same
+   mechanism against `LIGHTBAR`/`TUF_RGB_MODE`/`TUF_RGB_STATE` becomes
+   trustworthy. Candidates for what's wrong: `Arg0`'s actual purpose
+   (hardcoded to `0` throughout, never confirmed), whether `acpi_call`
+   needs integers passed with explicit width, whether the buffer literal
+   syntax `{0x21, 0x00, ...}` is being parsed the way expected.
+3. If a real "enable custom lighting" `DEVS` call is ever found this way,
+   note it'll need a `DEVS` invocation (not just `DSTS`), which is a
+   **write**, not read-only — treat with more caution than the probes
+   above.
+4. Don't re-try anything from the "ruled out" list — it's exhaustively
+   covered and reproducible via the five example binaries above.
+
+## Linux session 2 update — real breakthrough: basic keyboard color control WORKS
+
+A second Windows-side Claude Code session (working in parallel, different
+boot of the same physical laptop) captured a fresh interface-0 handshake
+sequence and handed it over — see `usb_capture_session2/` (its own note,
+`NOTE_FROM_WINDOWS_CLAUDE.md`, and the raw transcript,
+`handshake_transcript.tsv`). Replaying that sequence (see
+`g615lr-iface0-handshake-replay.rs` and the shorter
+`g615lr-core-handshake-then-color.rs` in `rog-platform/examples/`) produced
+the first-ever *real, visible* reaction from the hardware in this whole
+investigation — static orange transitioning to rainbow during the replay,
+reverting when it stopped — but never actually unlocked `0x04` color
+control. That thread is **not the actual fix** (see below for what was) but
+is preserved since it's real signal, just not the relevant signal.
+
+**The actual breakthrough came from a completely different angle**: using
+`rog-control-center` (the GUI, already in this repo) to change modes, while
+capturing with `usbmon`, showed *real, working* traffic on the classic
+`0x5d` protocol — direct contradiction of the original Windows
+investigation's "confirmed non-functional" finding for that protocol.
+Chasing why the GUI worked but `asusctl` (CLI) didn't led to the actual
+root causes, both mundane:
+
+1. **The installed `asusctl` CLI (`v6.3.7`) and the patched `asusd`
+   daemon (`v6.3.8`, built this session) were version-mismatched.** The
+   old CLI was silently failing to get color-set requests through — no
+   error surfaced, it just did nothing. Rebuilding `asusctl` from this
+   same repo (`cargo build --release -p asusctl`, matching `asusd`'s
+   version) immediately fixed this. (One build hiccup along the way: a
+   stale/corrupted incremental artifact in `target/release/` produced an
+   all-zeros non-ELF binary and a bogus "panic runtime" link error on the
+   first attempt — resolved by clearing just the affected `target/release/
+   deps/{asusd,asusctl}*` files and rebuilding, no full `cargo clean`
+   needed.)
+2. **This hardware silently drops short `0x5d` Output-report writes.**
+   `write_effect_and_apply` in `asusd/src/aura_laptop/mod.rs` (lines
+   ~105-123) already pads every `0x5d` write to the full 64-byte Output
+   report size declared in the HID descriptor — a fix that predates this
+   investigation entirely, added for a different laptop (`G533QS`, per the
+   inline comment) that happens to also fix `G615LR`. The original Windows
+   investigation almost certainly tested with the shorter, unpadded
+   17-byte (`AURA_LAPTOP_LED_MSG_LEN`) packets and got silently ignored —
+   hence "confirmed non-functional," which was true only for that specific
+   (unpadded) attempt, not the protocol in general.
+
+**Confirmed working, live, reproducibly**: `asusctl aura effect static -c
+<hex>` now visibly sets keyboard color (tested red, blue, green, all
+worked) via the **existing, unmodified upstream dispatch** — no G615LR
+patch code involved at all. Covers `AuraEffect`'s `Static`/`Breathe`/
+`RainbowCycle`/`RainbowWave` modes and the 4 keyboard zones (`Key1-4`) per
+`aura_support.ron`'s existing entry. `asusctl`/`asusd` are now installed
+system-wide as matching versions (`/usr/bin/asusctl`, backup at
+`/usr/bin/asusctl.bak-6.3.7`, alongside the earlier `/usr/bin/asusd.bak-
+6.3.7`).
+
+**The `0x5a` "handshake" mystery is also resolved, and turned out to be
+unrelated to any unlock sequence**: it's not constructed anywhere in this
+Rust codebase (`grep` across `rog-platform`/`rog-aura`/`asusd` for `0x5a`
+finds nothing). `set_led_mode_data`'s handler always calls `set_brightness`
+right after writing the effect, which goes through
+`rog_platform::keyboard_led::KeyboardBacklight` — a **plain sysfs write**
+to `/sys/class/leds/asus::kbd_backlight/brightness`. The kernel's own
+`hid_asus` driver is what turns that sysfs write into the `0x5a` HID
+report, entirely inside the kernel, invisible to any userspace code here.
+The "singular mysterious `0x5a` packet" in the original Windows capture was
+almost certainly Armoury Crate syncing keyboard brightness as a routine
+side effect of a mode change, not a special "enable custom lighting"
+handshake. The entire ACPI/WMI investigation (`acpi_call`, DSDT
+decompilation, `\_SB.ATKD.WMNB`) in the "Linux session 1" section above was
+a reasonable hypothesis at the time but is now understood to be chasing the
+wrong mechanism — harmless (all read-only probes), just not the answer.
+
+**What this does and does not resolve**:
+- ✅ Basic single/dual-color keyboard effects (4 zones, `Key1-4`) — solved,
+  works today, zero new code needed.
+- ❌ The actual goal of this whole patch — independent per-zone color
+  across all 16 zones including the 12 chassis/lightbar segments via the
+  new `0x04` protocol (`rog-aura::lightbar_2025`,
+  `Aura::write_lightbar_2025`) — **still unresolved**. The classic `0x5d`
+  protocol's `Key1-4` zones don't reach the chassis lightbar at all; this
+  is genuinely separate hardware/protocol territory. Every finding in
+  "Linux session 1" about `0x04` producing zero visible effect still
+  stands — nothing in session 2 changed that. The `0x5a` red herring does
+  NOT need to be sent before `0x04` packets; drop it from any future
+  `0x04` test sequences.
+
+**Suggested next step for the `0x04`/chassis-lightbar goal specifically**:
+now that a real, working, padded-Output-report precedent exists for `0x5d`,
+worth checking whether `0x04` (a **Feature** report, different type) has
+an analogous "must match declared size exactly, silently dropped
+otherwise" requirement that's already satisfied (51 bytes was confirmed
+against the live descriptor in session 1, so probably not this) — or
+whether `HidRaw`'s `HIDIOCSFEATURE` path has some other subtle mismatch
+against how `write_bytes`'s Output-report path succeeds. Given how mundane
+the actual `0x5d` fix turned out to be (padding + version match, not a
+handshake), it's worth re-examining `0x04` for an equally mundane
+explanation before assuming another deep protocol mystery.

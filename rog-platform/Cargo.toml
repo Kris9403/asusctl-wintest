@@ -18,3 +18,6 @@ inotify.workspace = true
 nix.workspace = true
 
 rusb.workspace = true
+
+[dev-dependencies]
+env_logger.workspace = true

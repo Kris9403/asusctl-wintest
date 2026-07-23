@@ -4753,8 +4753,10 @@ name = "rog_platform"
 version = "6.3.8"
 dependencies = [
  "concat-idents",
+ "env_logger",
  "inotify",
  "log",
+ "nix 0.29.0",
  "rusb",
  "serde",
  "udev 0.8.0",
