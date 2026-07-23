@@ -51,10 +51,23 @@ we are close.
   handshake capture + `NOTE_FROM_WINDOWS_CLAUDE.md`, handed over mid-
   investigation. Turned out to be a different (mode-cycling) capture than
   the one that actually unlocked `0x04`, but real, useful signal.
-- `usb_capture_session3/` (create this if it doesn't exist yet) — where
-  the next round of Windows-side data/notes should go, matching the same
-  pattern: raw capture(s) + a `NOTE_FROM_WINDOWS_CLAUDE.md`-style writeup.
-  See `QUESTIONS.md` for exactly what's being asked for.
+- `usb_capture_session3/` — Windows session 3 (2026-07-23): the priming/
+  static-hold test that answered `QUESTIONS.md` Q2
+  (`g615lr_priming_then_static_hold.ps1`), the labeled zone-map diagram
+  (`draw_zone_map.py` / `g615lr_zone_map.png`), and
+  `ground_truth/WDL_G615LR.csv` — ASUS's own official Aura Creator
+  device-layout file for this exact laptop, the source that fixed 6 wrong
+  zone IDs in this repo's map. Pull this CSV directly rather than trusting
+  zone names in prose anywhere else in this repo.
+- `usb_capture_session4/` — Windows session 4 (2026-07-23): two more real
+  captures. `multizone_12x_confirmed.pcapng` — 12 of 16 zones set
+  simultaneously to distinct colours via direct `HidSend.cs` calls,
+  human-confirmed correct on every zone (twice); full byte table in
+  `HANDOFF.md`, this is the reference to diff Linux's own packet output
+  against. `breathing_mode_capture.pcapng` — the capture behind the major
+  `0x0305` discovery (see "Current state" below and `HANDOFF.md`): built-in
+  animated effects (Breathing/Strobing/Color Cycle) use a completely
+  separate, continuously-streamed protocol, nothing to do with `0x04`.
 - `rog-platform/examples/g615lr-*.rs` — every Linux-side reproducible
   test binary, runnable directly (`sudo target/debug/examples/<name>`
   after `cargo build --example <name> -p rog_platform`). Each has a doc
@@ -100,9 +113,26 @@ entirely.
   See `HANDOFF.md` Windows session 3 and Linux session 3 Part B.
 - ⚠️ **This repo's zone map had 6 of 16 wire IDs wrong** (the back edge,
   `0x04-0x07`, and the left sidebar's front/back split, `0x09`/`0x0B`) —
-  corrected in Windows session 3 against `usb_capture_session3/ground_truth/WDL_G615LR.csv`,
-  ASUS's own official Aura Creator device profile for this laptop. Doesn't
-  change any wire bytes already sent by existing code/tests (a wire ID of
-  `0x06` was always `0x06` regardless of what it was labeled), but if
-  anything references zone names by their *old* labels rather than the hex
-  ID, re-check it against that CSV, not against older prose in this repo.
+  corrected in Windows session 3 (2026-07-23) against
+  `usb_capture_session3/ground_truth/WDL_G615LR.csv`, ASUS's own official
+  Aura Creator device profile for this laptop. Doesn't change any wire
+  bytes already sent by existing code/tests (a wire ID of `0x06` was
+  always `0x06` regardless of what it was labeled), but if anything
+  references zone names by their *old* labels rather than the hex ID,
+  re-check it against that CSV, not against older prose in this repo.
+  Re-validated live, human-confirmed, across 12 of 16 zones at once in
+  Windows session 4 (2026-07-23) — see
+  `usb_capture_session4/multizone_12x_confirmed.pcapng`.
+- 🆕 **Major discovery, Windows session 4 (2026-07-23): `0x0305` is a real,
+  separate, continuously-streamed animated-effects protocol, not a
+  one-shot handshake.** Built-in Armoury Crate effects (Breathing/
+  Strobing/Color Cycle) send **zero** `0x0304` packets — they drive the
+  whole chassis through `0x0305`, streamed at ~5-15Hz for as long as the
+  effect is active (`05 01 00 00 0f 00 [byte6] 00 [byte8] [byte9]`, which
+  byte varies depends on the mode — full table in `HANDOFF.md`). This has
+  never been attempted on Linux and has nothing to do with the still-open
+  `0x04` mystery — a real, independently achievable target. See
+  `HANDOFF.md`'s "Major discovery" section and the new questions at the
+  bottom of `QUESTIONS.md`.
+- ❓ Q1 (precise priming→visible-colour latency) is still open — not
+  answered yet, see `QUESTIONS.md`.
