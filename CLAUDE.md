@@ -111,28 +111,27 @@ entirely.
   session 3 answered `QUESTIONS.md` Q2 — zone variety is not required).
   So the remaining Linux gap is something else, not "needs more zones."
   See `HANDOFF.md` Windows session 3 and Linux session 3 Part B.
-- ⚠️ **This repo's zone map had 6 of 16 wire IDs wrong** (the back edge,
-  `0x04-0x07`, and the left sidebar's front/back split, `0x09`/`0x0B`) —
-  corrected in Windows session 3 (2026-07-23) against
-  `usb_capture_session3/ground_truth/WDL_G615LR.csv`, ASUS's own official
-  Aura Creator device profile for this laptop. Doesn't change any wire
-  bytes already sent by existing code/tests (a wire ID of `0x06` was
-  always `0x06` regardless of what it was labeled), but if anything
-  references zone names by their *old* labels rather than the hex ID,
-  re-check it against that CSV, not against older prose in this repo.
-  Re-validated live, human-confirmed, across 12 of 16 zones at once in
-  Windows session 4 (2026-07-23) — see
-  `usb_capture_session4/multizone_12x_confirmed.pcapng`.
-- 🆕 **Major discovery, Windows session 4 (2026-07-23): `0x0305` is a real,
-  separate, continuously-streamed animated-effects protocol, not a
-  one-shot handshake.** Built-in Armoury Crate effects (Breathing/
-  Strobing/Color Cycle) send **zero** `0x0304` packets — they drive the
-  whole chassis through `0x0305`, streamed at ~5-15Hz for as long as the
-  effect is active (`05 01 00 00 0f 00 [byte6] 00 [byte8] [byte9]`, which
-  byte varies depends on the mode — full table in `HANDOFF.md`). This has
-  never been attempted on Linux and has nothing to do with the still-open
-  `0x04` mystery — a real, independently achievable target. See
-  `HANDOFF.md`'s "Major discovery" section and the new questions at the
-  bottom of `QUESTIONS.md`.
-- ❓ Q1 (precise priming→visible-colour latency) is still open — not
-  answered yet, see `QUESTIONS.md`.
+- ✅ **Zone map fixed and doubly verified (2026-07-24)**: the 6 wrong wire
+  IDs found in Windows session 3 (back edge `0x04-0x07`, side front/back
+  split `0x08/0x09`/`0x0A/0x0B`) are now corrected in
+  `rog-aura/src/lightbar_2025.rs` (`Lightbar2025Zone` variant names only —
+  wire byte values were never wrong). Verified two ways: a permanent unit
+  test matching the human-confirmed 12-zone capture exactly, and a live
+  `usbmon` capture proving Linux's own wire bytes match the Rust code's
+  intended bytes byte-for-byte. Packet construction is about as exonerated
+  as it can be.
+- 🧪 **`0x0305` (the animated-effects protocol) tested on Linux for the
+  first time (2026-07-24), consistently negative.** Three controlled
+  variants (with real priming, without priming, with a real colour
+  pre-set) all produced no observable effect beyond whatever the *other*
+  mechanism in play was already doing. Also tried streaming it in parallel
+  with `0x04` — also negative, and consistent with real Windows captures
+  never actually combining the two. Not yet known whether this is a real
+  firmware gap or a still-missing prerequisite — see `HANDOFF.md` Linux
+  session 4 and `QUESTIONS.md`.
+- ❓ **`0x04` remains unsolved.** Every independently-testable-on-Linux
+  hypothesis has now been tried and ruled out (packet content, length,
+  transport, interface, timing, batching, `0x0305` combinations, zone
+  variety). Q1 (precise priming→visible-colour latency, Windows-side) is
+  the highest-value remaining open question — see `QUESTIONS.md`'s
+  Linux-session-4 questions for where this stands and what's needed next.

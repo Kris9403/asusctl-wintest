@@ -1293,3 +1293,32 @@ anywhere, it isn't in packet construction or in whether `write_control`
 actually transmits what's asked -- it would have to be something about
 call semantics/sequencing/timing this session hasn't identified yet, not
 "the bytes are wrong."
+
+**Confirmed directly: `rog-control-center` (GUI) sends byte-identical
+`0x5d` traffic to the CLI, no separate/different mechanism.** Captured a
+40-second window with `usbmon` while manually clicking through modes in
+the GUI (dark baseline first, `asusd` left running normally, not one of
+the raw test binaries). Same exact `b3`/`b5`/`b4`/`5a` four-packet
+sequence per mode change, same structure, as every CLI test already
+established -- this was previously assumed (both go through the identical
+`set_led_mode_data` D-Bus method) but is now directly verified with real
+capture data rather than just inferred from source.
+
+**False-alarm regression, real explanation found and confirmed fixed, not
+a code bug**: mid-session, `Static`/`Breathe`/`Pulse` appeared to stop
+working via the GUI (only `RainbowCycle`/`RainbowWave` still visibly
+worked), raising a real concern that this session's patches had broken
+something. The capture above explains it cleanly: every `b3` packet in
+that window had `colour1 = 00 00 00` (black), because
+`asusctl aura effect static -c 000000` (run deliberately for a clean dark
+baseline before the capture) set asusd's cached "last colour" state, and
+clicking mode tiles in the GUI without separately re-picking a colour for
+each one reused that same black. For `Static`/`Breathe`/`Pulse`, colour is
+literally what renders -- black is indistinguishable from off. For
+`RainbowCycle`/`RainbowWave`, `colour1` is irrelevant (procedural
+animations, not literal-colour modes), so they displayed fine regardless.
+**Confirmed fixed**: setting real colours (`static -c ff0000`,
+`pulse -c 0000ff`) immediately worked normally again. Nothing in this
+session's actual code changes was involved -- this would reproduce on
+stock, unpatched `asusctl` too if you set black then expected non-colour
+modes to still show something.
