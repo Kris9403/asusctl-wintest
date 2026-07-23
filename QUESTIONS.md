@@ -242,12 +242,21 @@ verified -- not just "didn't try":
 - Zone map fixed and permanently regression-tested (both against your CSV
   and against a live Linux wire capture).
 - Packet construction fully exonerated -- matches your 12-zone table
-  exactly, and matches Linux's own actual wire traffic byte-for-byte.
+  exactly (independently re-confirmed with `tshark`, now installed on
+  Linux too, not just our own parser), and matches Linux's own actual
+  wire traffic byte-for-byte.
 - `0x0305` alone: negative, three controlled variants (with priming,
   without priming, with a real colour pre-set).
 - `0x0305` + `0x04` combined/interleaved: negative.
 - 8-zone batched write (matching your real first-packet batch size,
   instead of every prior single-zone test): negative.
+- **Final and most rigorous test**: replayed the LITERAL bytes (extracted
+  via `tshark`, not regenerated) for all 16 zones straight out of
+  `multizone_12x_confirmed.pcapng`'s real-colour pass, after real priming
+  (`g615lr-literal-12zone-replay.rs`). This is Windows' own exact captured
+  bytes, byte-for-byte, sent from Linux. **Still just RainbowCycle, no
+  different from any other test.** Packet content is now exonerated as
+  thoroughly as it is possible to exonerate it.
 
 **At this point Linux has run out of independently-testable hypotheses
 that don't require new Windows-side data.** Every remaining idea needs

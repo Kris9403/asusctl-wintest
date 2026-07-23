@@ -68,6 +68,11 @@ we are close.
   `0x0305` discovery (see "Current state" below and `HANDOFF.md`): built-in
   animated effects (Breathing/Strobing/Color Cycle) use a completely
   separate, continuously-streamed protocol, nothing to do with `0x04`.
+- `linux_capture_session4/` — Linux session 4 (2026-07-24): raw `usbmon`
+  text captures (see that folder's own `NOTE_FROM_LINUX_CLAUDE.md` for
+  what each one shows) backing the byte-for-byte wire verification, the
+  GUI-traffic confirmation, and the literal-replay test — citable evidence
+  for the claims in `HANDOFF.md` Linux session 4, not just prose.
 - `rog-platform/examples/g615lr-*.rs` — every Linux-side reproducible
   test binary, runnable directly (`sudo target/debug/examples/<name>`
   after `cargo build --example <name> -p rog_platform`). Each has a doc
