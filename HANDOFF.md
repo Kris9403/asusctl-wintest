@@ -1062,3 +1062,73 @@ worked reliably every time. Separately: passing a literal
 to a single backslash, `\.\USBPcap1`, which `tshark` rejects outright) --
 use a native PowerShell invocation for anything with that path syntax,
 never Bash.
+
+### Major discovery: `0x0305` is a real, separate, continuously-streamed animated-effects protocol -- not a handshake packet
+
+Prompted by a direct question: is there anything else driving the chassis
+besides `0x04`, and do built-in modes like Breathing use different
+hardware bytes entirely? Answer: **yes, completely different mechanism,
+never previously characterized.**
+
+Captured a live session (`usb_capture_session4/breathing_mode_capture.pcapng`,
+120s window, human switched Armoury Crate through Breathing → Strobing →
+Color Cycle → Static Blue) and found:
+
+- **Zero `0x0304` packets in the entire capture.** Built-in animated
+  effects never touch the per-zone protocol at all.
+- **184 `0x0305` packets** -- the same report previously catalogued as a
+  one-shot "handshake" sent once before `0x04` traffic (see Windows
+  session 1/Linux session 3's priming-sequence table). It is not a
+  handshake. It's a **continuously-streamed, compact 10-byte effect-
+  parameter packet**, sent at roughly 5-15Hz for the entire duration an
+  animated mode is active, structured as:
+
+  ```
+  05 01 00 00 0f 00 [byte6] 00 [byte8] [byte9]
+  ```
+
+  Bytes 0-5 and the trailing structure stay constant; which of
+  bytes 6/8/9 actually varies -- and how -- depends on the active mode:
+
+  | Mode | What varies | Pattern observed |
+  |---|---|---|
+  | Breathing | `byte[9]` | Smooth ramp `0x00→0xff→0x00`, ~3s period -- textbook sine-wave brightness envelope |
+  | Strobing | `byte[9]` | Same envelope shape, much shorter period (faster oscillation) |
+  | Color Cycle | `byte[6]` | Ramps `0x00→0xff` then wraps; `byte[8]`/`byte[9]` locked to `0xff 0xff` (max saturation/value while hue rotates) |
+  | Static (any colour) | -- | Streaming **stops** -- confirms it's genuinely animation-only, not a periodic keepalive needed for `0x04` or anything else |
+
+  Each of the four mode switches was immediately preceded by the exact
+  same `5d b3 00 02 00 00 00 eb...` / `b4` / `b5` triplet already known
+  from the priming sequence -- **always with mode byte `0x02`
+  (`RainbowCycle`'s `AuraModeNum` value) regardless of which mode was
+  actually being switched to.** So that triplet is not "set mode to X" --
+  it's some kind of generic reset/re-init step using a hardcoded template,
+  sent before every mode change no matter the target. Worth remembering
+  next time that packet's exact role gets re-examined.
+
+  `byte[4]`'s constant value `0x0f` is unexplained -- could be a
+  zone/target selector (`0x0f` = 15 = highest zone ID, maybe a "target:
+  all zones" broadcast sentinel), could be something else entirely. Not
+  verified either way this session.
+
+**Why this matters more than it might first look**: this is a
+self-contained, fully-characterized, comparatively simple protocol that
+drives real hardware animation on the whole chassis, has nothing to do
+with the still-unsolved `0x04` per-zone mystery, and was never tested on
+Linux at all -- every Linux test so far has only ever attempted `0x04`.
+Implementing hardware Breathing/Strobing/Color Cycle via `0x0305` streaming
+could be a genuinely achievable, real win independent of whether `0x04`
+ever gets solved, and might also turn out to shed light on `0x04` by
+comparison once both are better understood (e.g. checking whether `0x04`
+needs similarly *continuous* streaming rather than the priming to be the
+missing piece -- worth revisiting with this framing in mind).
+
+**Not yet done**: didn't test whether Armoury Crate's UI speed/intensity
+setting changes the streaming *rate* rather than the byte values
+themselves (plausible reading of "level 0-3" style UI controls); didn't
+capture the other 7 built-in modes confirmed dead via `0x5d`
+(`Star`/`Rain`/`Highlight`/`Laser`/`Ripple`/`Comet`/`Flash`) to check
+whether they *also* try to stream `0x0305` and just get ignored by the
+firmware, which would be an easy independent cross-check of the "real
+firmware gap, not a code bug" conclusion from Linux session 3 Part A;
+didn't determine what `byte[4]=0x0f` means.
