@@ -78,6 +78,18 @@ pub const LIGHTBAR_2025_MAX_ZONES_PER_PACKET: usize = 8;
 /// Numeric values are the raw wire zone IDs, verified by direct
 /// single-zone-isolation testing (only the named zone lit, everything else
 /// forced off, before recording the result).
+///
+/// Variant NAMES (not values) were corrected 2026-07-23 against ASUS's own
+/// official Aura Creator device profile for this laptop
+/// (`usb_capture_session3/ground_truth/WDL_G615LR.csv`), cross-validated by
+/// a human-confirmed live 12-zone capture
+/// (`usb_capture_session4/multizone_12x_confirmed.pcapng`) and the labeled
+/// diagram at `usb_capture_session3/g615lr_zone_map.png`. Six of sixteen
+/// were wrong (back edge `0x04-0x07`, side-back/front split `0x08/0x09`
+/// and `0x0A/0x0B`) -- the wire IDs themselves (hex values below) were
+/// never wrong and no previously-sent packet bytes change as a result of
+/// this fix; only what a human calls each zone was incorrect. See
+/// `HANDOFF.md` "Windows session 3" for the full derivation.
 #[cfg_attr(
     feature = "dbus",
     derive(Type, Value, OwnedValue),
@@ -90,19 +102,14 @@ pub enum Lightbar2025Zone {
     Keyboard2 = 0x01,
     Keyboard3 = 0x02,
     Keyboard4 = 0x03,
-    BackBarLeft = 0x04,
-    BackBarRight = 0x05,
-    CornerBackLeft = 0x06,
-    CornerBackRight = 0x07,
-    /// Wire zone `0x08`. Physically the LEFT side strip's BACK half despite
-    /// the internal USB numbering suggesting otherwise -- this device's
-    /// zone IDs are cross-wired relative to any "obvious" left-to-right,
-    /// front-to-back numbering scheme. Do not assume adjacency in ID
-    /// implies adjacency in physical position.
-    SideLeftBack = 0x08,
-    SideLeftFront = 0x09,
+    BackBarRight = 0x04,
+    BackBarLeft = 0x05,
+    CornerBackRight = 0x06,
+    CornerBackLeft = 0x07,
+    SideRightBack = 0x08,
+    SideLeftBack = 0x09,
     SideRightFront = 0x0A,
-    SideRightBack = 0x0B,
+    SideLeftFront = 0x0B,
     CornerFrontRight = 0x0C,
     CornerFrontLeft = 0x0D,
     FrontBarRight = 0x0E,
@@ -115,14 +122,14 @@ impl Lightbar2025Zone {
         Self::Keyboard2,
         Self::Keyboard3,
         Self::Keyboard4,
-        Self::BackBarLeft,
         Self::BackBarRight,
-        Self::CornerBackLeft,
+        Self::BackBarLeft,
         Self::CornerBackRight,
-        Self::SideLeftBack,
-        Self::SideLeftFront,
-        Self::SideRightFront,
+        Self::CornerBackLeft,
         Self::SideRightBack,
+        Self::SideLeftBack,
+        Self::SideRightFront,
+        Self::SideLeftFront,
         Self::CornerFrontRight,
         Self::CornerFrontLeft,
         Self::FrontBarRight,
@@ -130,6 +137,13 @@ impl Lightbar2025Zone {
     ];
 
     /// Whether this zone's color slot needs the G/R channel swap.
+    ///
+    /// Targets wire IDs `0x09`/`0x0B` specifically (now named
+    /// `SideLeftBack`/`SideLeftFront` after the 2026-07-23 zone-name
+    /// correction above -- this match arm was updated to the new names but
+    /// still targets the exact same two wire IDs the original empirical
+    /// testing covered, so the underlying hardware behavior this encodes is
+    /// unchanged by the rename).
     ///
     /// UNVERIFIED / INCONSISTENT -- see module docs. This is the LATEST
     /// result (BackBarLeft/Right and CornerBackLeft/Right flipped to
@@ -140,9 +154,12 @@ impl Lightbar2025Zone {
     /// Armoury Crate's background services (ArmourySwAgent,
     /// LightingService, ROGLiveService, etc.) were never successfully
     /// stopped during testing and may race writes to this interface. Kill
-    /// those services fully before re-testing this table.
+    /// those services fully before re-testing this table. Also worth
+    /// re-verifying now given the zone-name correction above -- the
+    /// original swap testing may have been done under the wrong zone-ID
+    /// assumptions (see `HANDOFF.md` "Windows session 3").
     pub fn needs_grb_swap(&self) -> bool {
-        matches!(self, Self::SideLeftFront | Self::SideRightBack)
+        matches!(self, Self::SideLeftBack | Self::SideLeftFront)
     }
 }
 
@@ -219,6 +236,11 @@ mod tests {
             zone: Lightbar2025Zone::SideLeftFront,
             colour: Colour { r: 255, g: 0, b: 0 },
         }]);
+        // SideLeftFront is wire 0x0B -- assert the zone ID explicitly so a
+        // future accidental re-numbering (like the one fixed 2026-07-23)
+        // fails this test instead of silently passing.
+        assert_eq!(pkt[3], 0x0B);
+        assert_eq!(pkt[4], 0x00);
         // SideLeftFront needs swap -> G,R,B on the wire
         assert_eq!(pkt[19], 0); // g
         assert_eq!(pkt[20], 255); // r
@@ -233,5 +255,50 @@ mod tests {
             colour: Colour::default(),
         };
         build_lightbar_2025_packet(&[z; 9]);
+    }
+
+    /// Every zone/colour pair from the human-confirmed-correct live
+    /// capture (`usb_capture_session4/multizone_12x_confirmed.pcapng`,
+    /// `HANDOFF.md` "Windows session 3", 12 of 16 zones lit distinct
+    /// colours simultaneously, visually verified against the physical
+    /// hardware twice). Confirms every wire zone ID this crate assigns
+    /// matches what real hardware testing confirmed, and that non-swap
+    /// zones' colour byte order matches the real captured bytes exactly.
+    /// Doesn't exercise `needs_grb_swap` (the two swap zones, 0x09/0x0B,
+    /// were sent black in that capture, which is swap-invariant) -- see
+    /// `swap_zone_reorders_channels` above for that coverage instead.
+    #[test]
+    fn matches_human_confirmed_capture() {
+        use Lightbar2025Zone::*;
+        let cases: &[(Lightbar2025Zone, u8, [u8; 3])] = &[
+            (Keyboard1, 0x00, [0xFF, 0x00, 0x00]),
+            (Keyboard2, 0x01, [0x00, 0xFF, 0x00]),
+            (Keyboard3, 0x02, [0x00, 0x00, 0xFF]),
+            (Keyboard4, 0x03, [0xFF, 0xFF, 0xFF]),
+            (BackBarLeft, 0x05, [0xFF, 0x00, 0x00]),
+            (BackBarRight, 0x04, [0x00, 0xFF, 0x00]),
+            (CornerBackLeft, 0x07, [0x00, 0x00, 0xFF]),
+            (CornerBackRight, 0x06, [0xFF, 0xFF, 0x00]),
+            (CornerFrontRight, 0x0C, [0xFF, 0x80, 0x00]),
+            (CornerFrontLeft, 0x0D, [0xFF, 0xFF, 0xFF]),
+            (FrontBarRight, 0x0E, [0x00, 0xFF, 0xFF]),
+            (FrontBarLeft, 0x0F, [0xFF, 0x00, 0xFF]),
+        ];
+        for (zone, wire_id, rgb) in cases {
+            let pkt = build_lightbar_2025_packet(&[Lightbar2025ZoneColour {
+                zone: *zone,
+                colour: Colour {
+                    r: rgb[0],
+                    g: rgb[1],
+                    b: rgb[2],
+                },
+            }]);
+            assert_eq!(pkt[3], *wire_id, "{zone:?} wire ID low byte");
+            assert_eq!(pkt[4], 0x00, "{zone:?} wire ID high byte");
+            assert_eq!(pkt[19], rgb[0], "{zone:?} R");
+            assert_eq!(pkt[20], rgb[1], "{zone:?} G");
+            assert_eq!(pkt[21], rgb[2], "{zone:?} B");
+            assert_eq!(pkt[22], 0xFF, "{zone:?} alpha");
+        }
     }
 }
