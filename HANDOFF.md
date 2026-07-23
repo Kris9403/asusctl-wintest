@@ -953,28 +953,49 @@ worth (the actual value name is probably not literally either of those
 strings). `AsIO3`'s own log for `ArmouryCrate.Service.exe` is present but
 empty, no help either way.
 
-**Worth someone picking up if they have real binary-analysis tooling**
-(a disassembler/decompiler, not just string-grepping) -- find the actual
-function this log line comes from and what `WriteLegacyPlatformRegistry`
-was trying to write, and only then decide if it's relevant. Don't build
-on top of this as if it's established; it's a lead, not a result.
-
 Confirmed the plugin DLLs (`ArmouryCrate.*.dll`) are native PE binaries,
 not .NET (no CLR markers, `[System.Reflection.Assembly]::LoadFile` throws
 `0x80131018`) -- a .NET decompiler wouldn't help here, would need a real
-disassembler (Ghidra etc.).
+disassembler (Ghidra etc.), not attempted.
 
 Tried catching the actual registry write live with Sysinternals Process
 Monitor (elevated, headless capture via `/AcceptEula /Quiet /Minimized
-/BackingFile`), triggered by restarting the relevant ASUS services
-(`ArmouryCrateService`, `ArmouryCrateControlInterface`, `LightingService`,
-`ROG Live Service`, `AsusCertService`). **`EC_Update.txt`'s
-`LastWriteTime` did not change after the restart** -- this check does not
-re-fire on a plain service restart, only at some rarer trigger (most
-likely once per boot, or once per driver/update event). Catching it live
-would need a full reboot under an active Procmon capture, which wasn't
-judged worth doing given this lead's relevance to lighting specifically
-was already unconfirmed going in. **Closing this thread here** -- a real,
-documented, reproducible software gap in ASUS's own EC tooling, but not
-established as connected to the `0x04` lightbar protocol. Don't spend
-further time on it without a new reason to think it's actually related.
+/BackingFile`), triggered by restarting the relevant ASUS services. **The
+log's `LastWriteTime` did not change after a plain service restart** --
+so this check doesn't fire on every service start.
+
+**Follow-up that actually resolved it**: the registry search had been
+looking in the wrong place -- the real ASUS vendor key is
+`HKLM\SOFTWARE\WOW6432Node\ASUSTek Computer Inc.` (note capitalization,
+`WOW6432Node`, and no period after "Inc" vs the `ASUSTeK Computer Inc.`
+guessed earlier), found by listing `HKLM\SOFTWARE\WOW6432Node` directly
+rather than guessing the exact key name. It only contains two empty
+version-marker subkeys (`AC_MainSDK\1.00.0000`,
+`ASUS Framework Service\3.0.0.4`) with no values at all -- confirmed this
+isn't where the relevant data lives either, not just an unsearched gap.
+
+More usefully: cross-referenced the exact `EC_Update.txt` timestamp
+(2026-07-21 08:17:39) against Windows' own Application and System event
+logs. The Application log shows `AsusAppService` events firing right at
+that moment, wrapped inside a `RestartManager` session spanning
+08:17:13-08:17:35 (the pattern for an active install/update process, not
+routine runtime activity) -- consistent with why a plain service restart
+never reproduces it. The System log for the same window is unambiguous:
+this was a general software-maintenance burst -- Windows Update installing
+multiple packages (`Microsoft.WindowsAppRuntime.1.8`, `DesktopAppInstaller`,
+a Defender definitions update), TPM/Secure Boot certificate updates, and
+critically, **the `AsusSAIO` service being installed twice from the driver
+store** (`asussci2.inf`, `ASUSSystemAnalysis\AsusSAIO.sys`) at 08:17:34 and
+08:18:04 -- both essentially simultaneous with the `EC_Update.txt` line.
+`AsusSAIO` ("ASUS System Analysis I/O") is a general hardware-diagnostics/
+telemetry driver, not anything Aura/lighting-related.
+
+**Conclusion, with real evidence behind it this time**: the
+`Shipping_Year is not support` check is part of ASUS's routine software/
+driver update-and-registration cycle (tied to `AsusAppService` performing
+package maintenance, correlated with an unrelated diagnostics driver
+reinstall happening in the same window), not a lighting-specific gate and
+not something that fires during normal `0x04` operation. **Closing this
+thread with actual confidence** -- real, documented, reproducible gap in
+ASUS's tooling, but the evidence points away from it being connected to
+the lightbar protocol, not just "unconfirmed either way."
