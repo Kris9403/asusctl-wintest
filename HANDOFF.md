@@ -1251,3 +1251,45 @@ now; pivoting to testing whether *combining* `0x0305` streaming with `0x04`
 zone writes (a different hypothesis -- not "does 0x0305 animate on its
 own," but "does keeping it alive change whether 0x04 finally sticks") does
 anything, per `QUESTIONS.md`'s Windows-session-4 question 2.
+
+**Tried, negative**: `g615lr-0305-parallel-0304.rs` -- real priming, then
+10 seconds of `0x0305` (steady handshake-style bytes) interleaved with
+continuous `0x04` zone-`0x06` red writes (~15 writes/sec each,
+alternating). **Result: stayed on RainbowCycle the whole time, identical
+to every other priming test, zero incremental effect from the zone
+writes.** Consistent with the observation going into this test that real
+Windows captures never actually show these two mechanisms combined
+(`0x04` sessions send `0x0305` exactly once; `0x0305` animated-mode
+sessions send zero `0x0304`) -- this specific combination doesn't appear
+to be how the real protocol works, and testing it confirmed that rather
+than revealing something new. Crossing this off; the answer isn't
+"stream both at once."
+
+**Tried an 8-zone batched write, negative, plus a real byte-for-byte wire
+verification.** Windows session 1 found the real first `0x0304` write
+after priming is an 8-zone batch, not a single zone -- every prior Linux
+test streamed one static zone. `g615lr-8zone-batch.rs` batches 8 zones
+(the 4 keyboard + 4 back-edge zones, each a distinct colour) using the
+*real* production packet builder (`rog_aura::build_lightbar_2025_packet`,
+not hand-rolled bytes) after real priming, held for 10 seconds. **Result:
+stayed on RainbowCycle, identical to every single-zone test.**
+
+At this point the pattern of "always exactly the same result regardless of
+what's in the `0x04` payload" raised a fair question (asked directly): is
+this actually a bug in the Rust code, not a protocol mystery? Checked
+directly rather than assumed -- captured this exact test run with
+`usbmon` and compared the program's own printed intended packet bytes
+against the literal bytes recorded going out on the wire.
+**Byte-for-byte match, confirmed.** (One wrinkle: usbmon's text interface
+only displays the first 32 of the 51 bytes per line by default -- a known
+display limitation, not a real truncation; the same URB record's own
+`wLength=51` field and every test's own `Ok(51)` "bytes accepted" return
+value independently and consistently confirm the full packet actually
+transfers.) **This rules out "wrong bytes reaching the wire" as thoroughly
+as it can be ruled out** -- the zone IDs, structure, and colour data the
+Rust code intends to send are provably identical to what's recorded
+leaving the machine on the real USB bus. If there's still a code-level bug
+anywhere, it isn't in packet construction or in whether `write_control`
+actually transmits what's asked -- it would have to be something about
+call semantics/sequencing/timing this session hasn't identified yet, not
+"the bytes are wrong."
