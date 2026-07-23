@@ -926,3 +926,55 @@ index (e.g. `led key="6"`), and `WDL_G615LR.csv`'s "LED 6" row is
 everything above, no new information beyond confirming the CSV's row
 numbering is the same numbering Aura Creator's own script format uses
 internally.
+
+### Unconfirmed lead, flagged but not verified -- don't treat as a finding
+
+`C:\ProgramData\ASUS\EC_Logs\EC_Update.txt` contains, twice (2026-06-30
+and 2026-07-21): `[CheckArmouryCrateStaticField] Shipping_Year is not
+support m_ArmouryCrateStaticFieldYear = 2025`, immediately followed by a
+`WriteDLLVersionRegistry` that succeeds and a `WriteLegacyPlatformRegistry
+fail outData 7` that doesn't. Read at face value, this is ASUS's own EC
+update tooling explicitly saying it doesn't have support data for
+2025-model-year laptops, with a registry write failing right after --
+tempting to read as *the* missing "host claims control" mechanism this
+whole investigation has been looking for.
+
+**Did not confirm this is actually about lighting.** Tried to find which
+binary logs this string to establish scope (the EC subsystem covers fan
+curves, power profiles, and other non-lighting features too, all through
+`Armoury Crate Service`'s many plugin DLLs -- `GPUMode`, `ThrottlePlugin`,
+`HWPlugin`, etc., alongside `AuraPlugin`) -- the search either matched
+implausibly broadly (consistent with a shared logging string compiled into
+a common base library across every plugin, not something lighting-
+specific) or timed out before completing cleanly; registry search for the
+literal value names mentioned in the log (`ProjectYear`, `StaticField`)
+came up empty in both `HKLM\SOFTWARE` and `HKCU\SOFTWARE`, for what that's
+worth (the actual value name is probably not literally either of those
+strings). `AsIO3`'s own log for `ArmouryCrate.Service.exe` is present but
+empty, no help either way.
+
+**Worth someone picking up if they have real binary-analysis tooling**
+(a disassembler/decompiler, not just string-grepping) -- find the actual
+function this log line comes from and what `WriteLegacyPlatformRegistry`
+was trying to write, and only then decide if it's relevant. Don't build
+on top of this as if it's established; it's a lead, not a result.
+
+Confirmed the plugin DLLs (`ArmouryCrate.*.dll`) are native PE binaries,
+not .NET (no CLR markers, `[System.Reflection.Assembly]::LoadFile` throws
+`0x80131018`) -- a .NET decompiler wouldn't help here, would need a real
+disassembler (Ghidra etc.).
+
+Tried catching the actual registry write live with Sysinternals Process
+Monitor (elevated, headless capture via `/AcceptEula /Quiet /Minimized
+/BackingFile`), triggered by restarting the relevant ASUS services
+(`ArmouryCrateService`, `ArmouryCrateControlInterface`, `LightingService`,
+`ROG Live Service`, `AsusCertService`). **`EC_Update.txt`'s
+`LastWriteTime` did not change after the restart** -- this check does not
+re-fire on a plain service restart, only at some rarer trigger (most
+likely once per boot, or once per driver/update event). Catching it live
+would need a full reboot under an active Procmon capture, which wasn't
+judged worth doing given this lead's relevance to lighting specifically
+was already unconfirmed going in. **Closing this thread here** -- a real,
+documented, reproducible software gap in ASUS's own EC tooling, but not
+established as connected to the `0x04` lightbar protocol. Don't spend
+further time on it without a new reason to think it's actually related.
