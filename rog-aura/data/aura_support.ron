@@ -405,18 +405,35 @@
         power_zones: [Keyboard, Lightbar],
     ),
     (
-        // NOTE: this entry describes the LEGACY 0x5d protocol, which live
-        // testing found does NOT actually control this board's lighting at
-        // all (see docs/g615lr-aura-protocol.md). Real per-zone/lightbar
-        // color control on this laptop goes through a second, separate
-        // protocol (HID Feature report 0x04) implemented in
-        // rog-aura::lightbar_2025, not yet wired into asusd. Do not assume
-        // this RON entry is functional for chassis lighting until that's
-        // done.
+        // NOTE: this entry describes the LEGACY 0x5d protocol. Earlier
+        // testing (on Windows, with unpadded packets) found it non-
+        // functional, but confirmed live on Linux (see HANDOFF.md "Linux
+        // session 2") that it DOES work, once asusd pads 0x5d writes to
+        // the full 64-byte Output report (already the case in this
+        // branch) and the CLI/daemon versions match. Also confirmed live:
+        // this protocol drives the WHOLE chassis as one unit (keyboard +
+        // full lightbar together, matching `power_zones` below), not just
+        // the 4 keyboard zones -- there is no independent per-zone control
+        // through this protocol, only a single global colour/effect.
+        //
+        // `basic_modes` below is the VERIFIED-WORKING subset, tested live
+        // one by one (see HANDOFF.md "Linux session 2"): all 4 of the
+        // original conservative list work, plus Pulse from the wider
+        // G634J/G635L list. Star, Rain, Highlight, Laser, Ripple, Comet,
+        // and Flash were tried and confirmed NOT to do anything on this
+        // board -- do not re-add them without new evidence. Breathe works
+        // but only shows its first colour; the second (`colour2`) argument
+        // appears to be ignored by this hardware/firmware combination.
+        //
+        // Real independent per-zone/lightbar colour control on this laptop
+        // (the 12 chassis/lightbar segments, individually addressable)
+        // goes through a second, separate protocol (HID Feature report
+        // 0x04) implemented in rog-aura::lightbar_2025, not yet wired into
+        // asusd, and still unresolved -- see HANDOFF.md "Linux session 1".
         device_name: "G615LR",
         product_id: "",
         layout_name: "g634j-per-key",
-        basic_modes: [Static, Breathe, RainbowCycle, RainbowWave],
+        basic_modes: [Static, Breathe, RainbowCycle, RainbowWave, Pulse],
         basic_zones: [Key1, Key2, Key3, Key4],
         advanced_type: r#None,
         power_zones: [Keyboard, Lightbar],

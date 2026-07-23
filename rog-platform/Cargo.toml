@@ -21,3 +21,4 @@ rusb.workspace = true
 
 [dev-dependencies]
 env_logger.workspace = true
+rog_aura = { path = "../rog-aura" }

@@ -4757,6 +4757,7 @@ dependencies = [
  "inotify",
  "log",
  "nix 0.29.0",
+ "rog_aura",
  "rusb",
  "serde",
  "udev 0.8.0",

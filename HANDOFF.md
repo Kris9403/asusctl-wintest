@@ -179,6 +179,30 @@ over the Windows one; Linux removes the Armoury Crate variable entirely.
   than `docs/g615lr-aura-protocol.md`, which is the trimmed-for-upstream
   version.
 
+## Housekeeping note: a line-ending bug from the Windows→Linux handoff (now fixed)
+
+When this repo made the trip from Windows to Linux (via a Google Drive
+copy, not a fresh `git clone`), every tracked file arrived with CRLF line
+endings instead of the LF the git blobs actually contain — almost
+certainly because the Windows-side git checkout had `core.autocrlf=true`
+(or equivalent) converting LF→CRLF on checkout, and the raw checked-out
+files were what got copied, not a clean re-clone. The practical symptom on
+first opening this repo on Linux: `git status`/`git diff` showed **~200
+files as modified**, every single one of them 100% whitespace noise
+(verified with `git diff --ignore-space-at-eol`, which showed zero real
+differences). This has been fixed on the Linux side
+(`git checkout -- .` after confirming no real changes were being
+discarded), and the working tree is now clean LF throughout.
+
+**For whoever sets up git checkouts on the Windows side going forward**:
+either set `core.autocrlf=input` (checks out LF, converts CRLF→LF on
+commit, avoids this class of bug entirely) or `core.autocrlf=false` (no
+conversion at all) before checking out this repo, rather than the default
+`true`, which is what caused this. Worth a quick check next time you're
+setting up a fresh checkout there — not a blocker for anything, just
+avoids a repeat of a slightly alarming "200 files changed" moment that
+turned out to be nothing.
+
 ## Linux session 1 update — compiles clean, hardware-tested extensively, still no visible effect
 
 Everything in "Step 1" above is now done and passed on the real
@@ -429,3 +453,228 @@ against how `write_bytes`'s Output-report path succeeds. Given how mundane
 the actual `0x5d` fix turned out to be (padding + version match, not a
 handshake), it's worth re-examining `0x04` for an equally mundane
 explanation before assuming another deep protocol mystery.
+
+## Linux session 3 update — 12-mode verification, and the closest look yet at 0x04
+
+Written 2026-07-23, ~11:50 IST. Timeline below is reconstructed from real
+timestamps (git commit times, file mtimes on the test binaries as each was
+written and immediately run) — not estimated after the fact:
+
+| When (2026-07-22/23, IST) | What |
+|---|---|
+| 07-22 16:06 – 16:11 | Windows handoff commits land: `0afeec6d` (HIDIOCSFEATURE + lightbar_2025 wiring), `97fb9ff5` (HANDOFF.md) |
+| 07-22 20:29 – 20:43 | Linux session 1: first hardware tests (`g615lr-lightbar-test.rs` → `g615lr-with-handshake.rs`) — packet content, transport, interface, `hid_asus` driver, timing all ruled out as the cause of `0x04` producing no visible effect |
+| 07-22 21:47 – 21:57 | Linux session 2: Windows-side interface-0 handshake (from a *different*, mode-cycling capture) replayed (`g615lr-iface0-handshake-replay.rs`, `g615lr-core-handshake-then-color.rs`) — real rainbow reaction confirmed, colour still not unlocked |
+| 07-23 10:56 | Commit `147fbcc6` — sessions 1+2 findings, test binaries, and the CRLF-noise cleanup landed |
+| 07-23 11:13 | `g615lr-5d-then-04.rs` — proven `0x5d` static-colour immediately followed by `0x04`; discovered `0x5d` drives the *whole chassis*, not just keyboard |
+| 07-23 11:20 – 11:35ish | 12-mode live verification via `asusctl aura effect <mode>` (not a standalone test binary, done via CLI) — 5 of 12 confirmed working |
+| 07-23 11:28 | `g615lr-mode-compare.rs` — Pulse-vs-Comet ACK comparison, confirms the 7 failing modes are a real firmware gap, not a packet-construction bug |
+| 07-23 11:37 | `g615lr-real-priming-sequence.rs` — ground-truth priming sequence mined directly from `aura.pcap`, replayed exactly; confirms the "dead/vestigial" `5d b3 00 02...` packet is real (triggers genuine RainbowCycle) |
+| 07-23 11:40 | `g615lr-prime-then-stream.rs` — priming + 8s continuous `0x04` streaming; still stuck on rainbow, current dead end |
+| 07-23 ~11:50 | This section written; `QUESTIONS.md` and `CLAUDE.md` added; repo pushed to the shared GitHub remote for Windows to pull from directly |
+
+**IMPORTANT FRAMING, read this before anything else in this section**: the
+`0x04`/per-zone chassis lightbar problem is **not a hardware limitation**.
+This is not speculation — it was directly, repeatedly, reproducibly
+demonstrated on Windows: individual zones were painted different colours
+simultaneously, a custom India-flag layout was built with the physical
+chassis split into three colour bands, and a live breathing animation was
+run on just two specific zones (`kbd2`/`kbd3`, the "chakra") while the rest
+stayed static — all captured on video, all repeatable, all via the exact
+`0x04` protocol this repo implements. Whatever is blocking this on Linux is
+a **gap in our own understanding or code**, not a ceiling the hardware
+imposes. Every future session picking this up should start from that
+premise, not from "maybe it just doesn't work on Linux."
+
+### Part A: `basic_modes` widened and empirically verified (12 legacy `0x5d` modes)
+
+With the `0x5d` breakthrough from session 2 in hand, `aura_support.ron`'s
+`G615LR` entry was temporarily widened from the original conservative
+4-mode list to the full 12 (matching `G634J`/`G635L`), then every mode was
+tested live, one at a time, via `asusctl aura effect <mode> ...`:
+
+**Confirmed working** (5): `Static`, `Breathe` (colour1 only — `colour2` is
+silently ignored by this hardware/firmware, worth fixing in the CLI/UI
+expectations but not a blocker), `RainbowCycle` (genuinely animates,
+autonomously, continuously — the whole chassis, not just keyboard),
+`RainbowWave`, `Pulse`.
+
+**Confirmed NOT working** (7): `Star`, `Rain`, `Highlight`, `Laser`,
+`Ripple`, `Comet`, `Flash` — tried individually, zero visible effect each.
+
+`aura_support.ron` has been corrected back down to just the 5 verified
+modes (not left at 12) so the CLI/GUI don't offer options that silently
+no-op. See the inline comment on the `G615LR` entry for the full rationale.
+
+Also confirmed live: **the classic `0x5d` protocol drives the entire
+chassis as one unit** (keyboard + full lightbar together, matching
+`power_zones: [Keyboard, Lightbar]`) — there is no independent per-zone
+control through this protocol, only a single global colour/effect. This
+was discovered by accident: a combined "0x5d then 0x04" test turned the
+keyboard blue as expected, and the chassis corner turned blue too, even
+though the follow-up `0x04` packet asked for red on that specific zone —
+i.e. the `0x5d` write alone accounted for the whole visible result, and the
+`0x04` write on top of it did nothing detectable.
+
+**Is "7 modes don't work" a code bug or a real firmware gap?** Checked
+directly, not assumed. `AuraModeNum`'s enum values
+(`rog-aura/src/builtin_modes.rs:260`) are `Static=0, Breathe=1,
+RainbowCycle=2, RainbowWave=3, Star=4, Rain=5, Highlight=6, Laser=7,
+Ripple=8, [value 9 is skipped entirely], Pulse=10, Comet=11, Flash=12` —
+note the gap at 9. The working set is exactly `{0,1,2,3,10}`; the failing
+set is exactly `{4,5,6,7,8,11,12}`. Built a comparison test
+(`rog-platform/examples/g615lr-mode-compare.rs`, uses the REAL
+`AuraEffect`→bytes conversion from `rog-aura`, not hand-rolled bytes) that
+sends a working mode (`Pulse`) and a failing one (`Comet`) back to back
+with a `usbmon` capture running. Result: **both get byte-for-byte identical
+ACK sequences from the device** (`5d ec b3` / `5d ec b5` / `5d ec b4` on
+the interrupt-IN endpoint, once per command, for both). The only
+difference between the two packets is a single byte (the mode number).
+Since the device acknowledges both identically, this looks like a genuine
+firmware limitation on this specific 2025-refresh EC (smaller mode table
+than `G634J`/`G635L`) rather than anything wrong in how the packets are
+built or sent. Live side-observation: sending `Comet` while `Pulse` was
+mid-animation didn't switch to Comet's colour, it just froze Pulse's
+animation on its last frame — consistent with the firmware accepting the
+command structurally (enough to interrupt whatever it was doing) but
+having no actual handler for mode 11 to hand off to.
+
+### Part B: the closest look yet at why `0x04` doesn't work — real progress, not yet solved
+
+Two new things found this session, both from directly mining the real,
+working `usb_capture/aura.pcap` capture (not guessing):
+
+**1. `0x04` never gets an interrupt-IN ACK — but neither does it on
+Windows, even when working.** Checked directly: in `aura.pcap`, the
+nearest interrupt-IN packet after any real, working `0x0304` SET_REPORT is
+17-19 **seconds** later, and it's just the generic idle heartbeat, totally
+unrelated in timing. So the absence of an ACK for `0x04` on Linux (checked
+via `rog-platform/examples/g615lr-raw-usb-test.rs` + a `usbmon` capture) is
+**not** diagnostic of failure — it's normal behaviour for this report on
+any OS. Ruled out cleanly, not just assumed.
+
+**2. Found and replicated the EXACT wire sequence that precedes the first
+successful `0x04` write in a real session** — extracted by chronologically
+scanning every control transfer in `aura.pcap` before that first write,
+not reconstructed from theory:
+
+```
+SET_IDLE            iface 1
+SET_IDLE            iface 0
+SET_REPORT 0x0201   "01 01"                        iface 0  (2 bytes)
+SET_REPORT 0x025d   "5d b3 00 02 00 00 00 eb..."    iface 0  (64 bytes, padded)
+SET_REPORT 0x025d   "5d b4 00..."                   iface 0  (64 bytes, padded)
+SET_REPORT 0x025d   "5d b5 00..."                   iface 0  (64 bytes, padded)
+SET_REPORT 0x0305   "05 00 08 00 0f 00 00 00 00 01" iface 1  (10 bytes)
+SET_REPORT 0x0304   <zone data>                     iface 1  <- the real write
+```
+
+Two important corrections to earlier assumptions this uncovered:
+- The `5d b3 00 02 00 00 00 eb` packet is the exact one the *original*
+  Windows investigation dismissed as "dead/vestigial, always identical
+  regardless of mode" (see `usb_capture/README.md`'s "No firmware effects"
+  section). **It is not dead.** Its mode byte (`02`) is a real
+  `AuraModeNum::RainbowCycle` value, and replaying just this priming
+  sequence (`rog-platform/examples/g615lr-real-priming-sequence.rs`) 
+  visibly puts the ENTIRE chassis into genuine, continuous RainbowCycle
+  animation on Linux, live-confirmed. It's real, it's just not what it was
+  taken for — it's routine session-priming boilerplate that happens to be
+  interpretable as (and does trigger) a real global mode-set, sent once
+  per session, not something to skip as inert.
+- The real `b3`/`b4`/`b5` order in this priming sequence is `b3, b4, b5`
+  — **not** `b3, b5, b4`, which is the order `write_effect_and_apply` in
+  `asusd/src/aura_laptop/mod.rs` and every prior `0x5d` test in this repo
+  used. Worth a closer look at whether order matters for the priming
+  triplet specifically (it apparently doesn't matter for the *effect*
+  triplet, since `b3,b5,b4` demonstrably works for real colour-setting —
+  but this is a different, one-time-per-session packet, not necessarily
+  governed by the same rule).
+
+**Chronological analysis of the full capture confirms this priming
+sequence is sent exactly ONCE per session**, at the very start, never
+repeated — followed by a continuous, rapid stream of `0x04` zone writes
+(roughly every 200-800ms, for the entire ~40+ second window examined,
+cycling through different single/multi-zone combinations, consistent with
+either a live demo cycling zones or a host-computed animation).
+
+**Tested, in order**:
+1. Priming sequence + single one-shot `0x04` write
+   (`g615lr-real-priming-sequence.rs`): chassis visibly enters RainbowCycle
+   (confirming the priming packet is real), the single `0x04` write after
+   it has no visible incremental effect — corner never shows the requested
+   colour.
+2. Priming sequence + continuous `0x04` streaming for 8 seconds at ~4/sec
+   (`g615lr-prime-then-stream.rs`), on the theory that Windows' own
+   continuous stream is what overrides/suppresses the RainbowCycle the
+   priming triggers: **still stuck on rainbow for the full 8 seconds**,
+   never resolved to the requested colour.
+
+So the theory that "continuous streaming after priming is sufficient" did
+**not** pan out as tested — this is a real negative result, not yet
+explained. Open possibilities, none confirmed:
+- Streaming rate/duration insufficient (Windows' actual rate right after
+  priming was not independently re-measured beyond the general
+  200-800ms figure — worth checking the first few post-priming writes
+  specifically, they may be denser/faster than the steady-state rate later
+  in the capture).
+- Something Linux-side about the detach/reattach or multi-interface
+  claim/release cycle introduces enough latency between priming and the
+  start of streaming to matter, where Windows' single persistent handle
+  wouldn't. Or something else entirely, not yet identified, that only
+  shows up once you're actually mid-stream (nothing in this session tested
+  what a much longer stream, e.g. 30-60s, does — 8s may simply not be
+  enough if the EC has its own multi-second internal timeout/settle
+  behaviour).
+- `SET_IDLE` on interface 1 fails with `Err(Pipe)` (STALL) on this
+  hardware in every test this session — interface 0's `SET_IDLE` succeeds.
+  This is presumably benign (many HID devices don't implement `SET_IDLE`
+  for Feature-only interfaces and STALLing it is normal/expected), but it
+  was never independently confirmed as harmless — worth checking whether
+  Windows' `SET_IDLE` on interface 1 also fails/is skipped, or succeeds
+  differently.
+- The specific zone/colour data in the `0x04` packets being streamed was
+  NOT varied to match what the real capture's own stream was doing
+  (cycling through many different zones per packet) — every Linux test
+  this session sent the exact same single zone (`0x06`, red) repeatedly.
+  Worth trying to replicate the ACTUAL cycling pattern from the capture
+  (see the zone-ID sequence in the "Part B" write-up above) instead of one
+  static zone, in case the EC's firmware expects to see zone IDs actually
+  changing to recognize "an active per-zone session is in progress."
+
+### Reproducible test binaries (all in `rog-platform/examples/`, run via `sudo target/debug/examples/<name>`)
+
+- `g615lr-lightbar-test.rs`, `g615lr-replay-capture.rs`,
+  `g615lr-raw-usb-test.rs`, `g615lr-with-handshake.rs`,
+  `g615lr-hold-test.rs` — session 1 tests, see that section.
+- `g615lr-iface0-handshake-replay.rs`,
+  `g615lr-core-handshake-then-color.rs` — session 2's Windows-handshake
+  replay tests (a DIFFERENT capture/handshake than session 3's, from mode-
+  cycling rather than zone-painting — produced a real rainbow reaction but
+  never unlocked colour either).
+- `g615lr-5d-then-04.rs` — proven `0x5d` static-colour sequence immediately
+  followed by a `0x04` zone write (session 3). Confirmed the whole-chassis
+  finding above.
+- `g615lr-mode-compare.rs` — Pulse-vs-Comet ACK comparison (session 3 part A).
+- `g615lr-real-priming-sequence.rs` — the ground-truth priming sequence
+  extracted from `aura.pcap`, one-shot `0x04` write after (session 3 part B).
+- `g615lr-prime-then-stream.rs` — same priming, then 8s of continuous
+  `0x04` streaming (session 3 part B).
+
+### For whoever picks this up next (any OS, any session)
+
+Do not conclude `0x04` is unsolvable. The hardware proof from Windows is
+solid and repeatable. The most promising untried angles, in rough priority
+order:
+1. A **much longer** stream after priming (30-60s+, not 8s) — cheap to
+   test, rules out a settle-time theory.
+2. Replicate the ACTUAL cycling-zone pattern from the capture during the
+   stream, not one static zone.
+3. Get a fresh Windows capture that specifically instruments/logs exactly
+   when (wall-clock, relative to the priming sequence) the FIRST visible
+   colour change happened, to get a real target latency/rate to match,
+   rather than inferring it from packet spacing alone.
+4. Consider capturing with `usbmon` running continuously across a full
+   priming+stream Linux test (not just checking before/after) to see the
+   complete interrupt-IN timeline during the stream itself, not just
+   immediately after — may reveal periodic traffic during sustained
+   streaming that a short single-shot check would miss.
