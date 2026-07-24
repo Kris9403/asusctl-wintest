@@ -1372,3 +1372,61 @@ evidence on its own.)
 pattern Windows established) -- see that folder's own
 `NOTE_FROM_LINUX_CLAUDE.md` for details on both files and the `usbmon`
 32-byte text-display-truncation gotcha discovered while producing them.
+
+## Windows session 5 -- reframing "why does it always end up on RainbowCycle"
+
+Prompted by a direct question after reading Linux session 4's results in
+full: why RainbowCycle *specifically*, every single time, regardless of
+what the `0x04` payload contains? The answer was already sitting in data
+gathered earlier this investigation, just not stated explicitly.
+
+**The "priming" `5d b3/b4/b5` triplet is not a handshake or precondition
+-- it is a complete, valid, successfully-applied `0x5d` command.** `b3`'s
+payload is `AuraEffect`'s real wire encoding: mode byte `0x02` is the
+literal `AuraModeNum::RainbowCycle` value, and `b4`/`b5` are the same
+apply/commit pair `write_effect_and_apply` uses for every other real
+`0x5d` effect-set call. Confirmed hardcoded to `0x02` regardless of
+target, across all 4 real mode switches in Windows session 4's
+`breathing_mode_capture.pcapng` (Breathing/Strobing/Color Cycle/Static all
+preceded by the identical `mode=0x02` reset). So every test in this
+investigation that "primes" the device by sending this triplet is, as a
+side effect, **actually issuing and successfully completing a real
+`0x5d set-effect(RainbowCycle) + apply` command** -- not sending inert
+setup data before the "real" protocol starts.
+
+**This reframes the whole `0x04` question.** It was never really "why
+doesn't `0x04` produce a visible effect" -- every test's baseline already
+has a real, successfully-applied, whole-chassis animation running via
+`0x5d` before any `0x04` byte is ever sent. The actual question is **why
+doesn't `0x04` override an already-active, already-applied `0x5d`
+RainbowCycle state.** On Windows, something clearly does override it --
+every real captured working session shows a genuine colour after this
+exact sequence. On Linux, nothing has, in any test run so far, including
+the literal-byte-replay test that eliminates payload content as a
+variable entirely.
+
+**One thing this doesn't yet explain**: raw timing alone doesn't obviously
+account for the difference. The real Windows capture
+(`aura.pcap`, Windows session 1) shows only ~42ms between the last priming
+packet and the first `0x0304` write -- if "RainbowCycle needs to actually
+start animating before `0x04` can interrupt it" were the mechanism, that
+window looks almost too short for the EC to have visibly begun animating
+at all. Windows session 3's own controlled test
+(`g615lr_priming_then_static_hold.ps1`) used a comparably tight,
+un-delayed gap between priming and the first `0x04` write and still
+succeeded. Linux's literal-replay test structure is similarly tight. So
+"give `0x04` more of a head start before RainbowCycle takes hold" is not
+obviously the missing piece by itself -- but it's a much more specific,
+testable question than the vague "why doesn't `0x04` work" framing this
+investigation started with, and worth carrying forward as the operating
+question rather than reverting to the old framing.
+
+**Not yet tested, worth trying next**: does explicitly *cancelling* the
+`0x5d` RainbowCycle state first (e.g. a real `Static` `0x5d` command, or
+whatever the genuine "turn off the classic effect engine" signal turns
+out to be) before attempting `0x04`, rather than relying on `0x04` to
+implicitly override it, change anything? This was never isolated as its
+own variable -- every test so far either sends the RainbowCycle-triggering
+triplet immediately before `0x04`, or (Linux's `g615lr-0305-only-stream.rs`)
+skips it entirely and gets a dark/inert baseline instead, never "a
+different, non-animating `0x5d` state, then `0x04`."
