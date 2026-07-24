@@ -9,7 +9,8 @@ use slint::{ComponentHandle, Model, RgbaColor, SharedString};
 use crate::config::Config;
 use crate::ui::show_toast;
 use crate::{
-    set_ui_callbacks, set_ui_props_async, AuraPageData, MainWindow, PowerZones as SlintPowerZones,
+    set_ui_callbacks, set_ui_props_async, AuraPageData, Lightbar2025Data, MainWindow,
+    PowerZones as SlintPowerZones,
 };
 
 fn decode_hex(s: &str) -> RgbaColor<u8> {
@@ -71,6 +72,75 @@ pub fn setup_aura_page(
         format!("#{:02X}{:02X}{:02X}", c.red(), c.green(), c.blue()).into()
     });
     g.on_cb_hex_to_colour(|s| decode_hex(s.as_str()).into());
+
+    // G615LR-specific, experimental: Lightbar2025Data is a completely
+    // separate global from AuraPageData above -- reuses the same
+    // decode_hex helper (not a new implementation) but shares no state.
+    // See ui/types/lightbar_2025_types.slint / ui/widgets/lightbar_2025_canvas.slint.
+    let g_lb = ui.global::<Lightbar2025Data>();
+    g_lb.on_hex_to_colour(|s| decode_hex(s.as_str()).into());
+
+    let handle_lb = ui.as_weak();
+    tokio::spawn(async move {
+        let Ok(aura) = find_aura_iface().await else {
+            return;
+        };
+        let Some(ui) = handle_lb.upgrade() else { return };
+        let g_lb = ui.global::<Lightbar2025Data>();
+        let weak = ui.as_weak();
+        g_lb.on_apply_lightbar_2025(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let g_lb = ui.global::<Lightbar2025Data>();
+            // (wire_zone_id, r, g, b) -- ordering/IDs match
+            // rog_aura::lightbar_2025::Lightbar2025Zone exactly.
+            let c = |col: slint::Color| (col.red(), col.green(), col.blue());
+            let (r0, g0, b0) = c(g_lb.get_colour_kbd1());
+            let (r1, g1, b1) = c(g_lb.get_colour_kbd2());
+            let (r2, g2, b2) = c(g_lb.get_colour_kbd3());
+            let (r3, g3, b3) = c(g_lb.get_colour_kbd4());
+            let (r4, g4, b4) = c(g_lb.get_colour_back_right());
+            let (r5, g5, b5) = c(g_lb.get_colour_back_left());
+            let (r6, g6, b6) = c(g_lb.get_colour_back_corner_right());
+            let (r7, g7, b7) = c(g_lb.get_colour_back_corner_left());
+            let (r8, g8, b8) = c(g_lb.get_colour_right_bar_back());
+            let (r9, g9, b9) = c(g_lb.get_colour_left_bar_back());
+            let (r10, g10, b10) = c(g_lb.get_colour_right_bar_front());
+            let (r11, g11, b11) = c(g_lb.get_colour_left_bar_front());
+            let (r12, g12, b12) = c(g_lb.get_colour_front_corner_right());
+            let (r13, g13, b13) = c(g_lb.get_colour_front_corner_left());
+            let (r14, g14, b14) = c(g_lb.get_colour_front_bar_right());
+            let (r15, g15, b15) = c(g_lb.get_colour_front_bar_left());
+            let zones: Vec<(u8, u8, u8, u8)> = vec![
+                (0x00, r0, g0, b0),
+                (0x01, r1, g1, b1),
+                (0x02, r2, g2, b2),
+                (0x03, r3, g3, b3),
+                (0x04, r4, g4, b4),
+                (0x05, r5, g5, b5),
+                (0x06, r6, g6, b6),
+                (0x07, r7, g7, b7),
+                (0x08, r8, g8, b8),
+                (0x09, r9, g9, b9),
+                (0x0A, r10, g10, b10),
+                (0x0B, r11, g11, b11),
+                (0x0C, r12, g12, b12),
+                (0x0D, r13, g13, b13),
+                (0x0E, r14, g14, b14),
+                (0x0F, r15, g15, b15),
+            ];
+            let p = aura.clone();
+            let t = weak.clone();
+            tokio::spawn(async move {
+                let r = p.write_lightbar_2025_zones(zones).await;
+                show_toast(
+                    "Lightbar 2025 zones sent".into(),
+                    "Lightbar 2025 send failed".into(),
+                    t,
+                    r,
+                );
+            });
+        });
+    });
 
     let handle = ui.as_weak();
     tokio::spawn(async move {

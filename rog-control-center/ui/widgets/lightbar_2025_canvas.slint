@@ -1,0 +1,166 @@
+// G615LR-specific, experimental per-zone chassis lightbar canvas.
+// Deliberately isolated: its own file, its own global (Lightbar2025Data,
+// see ../types/lightbar_2025_types.slint), doesn't import or touch
+// anything from aura_types.slint/colour_picker.slint's AuraEffect
+// controls. Not upstreamed; local-only while the underlying 0x04
+// protocol is still under investigation, see HANDOFF.md in the
+// asusctl-wintest research repo.
+//
+// Sixteen independent, individually-named zone rows (swatch + hex text
+// box), positioned to roughly match the physical chassis layout from
+// usb_capture_session3/g615lr_zone_map.png (back edge top, front edge
+// bottom, sides left/right, keyboard middle). Deliberately NOT a dynamic
+// `for` loop over an array-of-structs -- more repetitive markup, but
+// every element is a plain named property, which is the lowest-risk
+// Slint pattern available when nobody can compile-check this before
+// committing.
+
+import { Palette, LineEdit, Button } from "std-widgets.slint";
+import { Lightbar2025Data } from "../types/lightbar_2025_types.slint";
+
+component ZoneRow inherits Rectangle {
+    in property <string> label;
+    in-out property <color> zone_colour;
+    width: 92px;
+    height: 26px;
+    border-width: 1px;
+    border-color: Palette.border;
+    border-radius: 3px;
+    background: Palette.background;
+
+    HorizontalLayout {
+        padding: 2px;
+        spacing: 3px;
+        Rectangle {
+            width: 20px;
+            border-width: 1px;
+            border-color: Palette.border;
+            background: root.zone_colour;
+        }
+        LineEdit {
+            font-size: 9px;
+            text: root.label;
+            edited(text) => {
+                root.zone_colour = Lightbar2025Data.hex_to_colour(text);
+            }
+        }
+    }
+}
+
+export component Lightbar2025Canvas inherits Rectangle {
+    height: 430px;
+    border-width: 1px;
+    border-color: Palette.border;
+    border-radius: 4px;
+    background: Palette.alternate-background;
+
+    // Device outline, roughly matching the trapezoid deck shape from the
+    // zone-map diagram -- visual reference only, not interactive.
+    Rectangle {
+        x: 100px;
+        y: 20px;
+        width: 340px;
+        height: 300px;
+        background: Palette.background;
+        border-width: 1px;
+        border-color: Palette.border;
+        border-radius: 8px;
+    }
+
+    // --- Back edge (top) ---
+    ZoneRow {
+        x: 10px; y: 10px;
+        label: "back_corner_left";
+        zone_colour <=> Lightbar2025Data.colour_back_corner_left;
+    }
+    ZoneRow {
+        x: 140px; y: 10px;
+        label: "back_left";
+        zone_colour <=> Lightbar2025Data.colour_back_left;
+    }
+    ZoneRow {
+        x: 310px; y: 10px;
+        label: "back_right";
+        zone_colour <=> Lightbar2025Data.colour_back_right;
+    }
+    ZoneRow {
+        x: 460px; y: 10px;
+        label: "back_corner_right";
+        zone_colour <=> Lightbar2025Data.colour_back_corner_right;
+    }
+
+    // --- Left / right sides ---
+    ZoneRow {
+        x: 10px; y: 100px;
+        label: "left_bar_back";
+        zone_colour <=> Lightbar2025Data.colour_left_bar_back;
+    }
+    ZoneRow {
+        x: 10px; y: 230px;
+        label: "left_bar_front";
+        zone_colour <=> Lightbar2025Data.colour_left_bar_front;
+    }
+    ZoneRow {
+        x: 460px; y: 100px;
+        label: "right_bar_back";
+        zone_colour <=> Lightbar2025Data.colour_right_bar_back;
+    }
+    ZoneRow {
+        x: 460px; y: 230px;
+        label: "right_bar_front";
+        zone_colour <=> Lightbar2025Data.colour_right_bar_front;
+    }
+
+    // --- Keyboard (middle) ---
+    ZoneRow {
+        x: 130px; y: 165px;
+        label: "kbd1";
+        zone_colour <=> Lightbar2025Data.colour_kbd1;
+    }
+    ZoneRow {
+        x: 228px; y: 165px;
+        label: "kbd2";
+        zone_colour <=> Lightbar2025Data.colour_kbd2;
+    }
+    ZoneRow {
+        x: 130px; y: 195px;
+        label: "kbd3";
+        zone_colour <=> Lightbar2025Data.colour_kbd3;
+    }
+    ZoneRow {
+        x: 228px; y: 195px;
+        label: "kbd4";
+        zone_colour <=> Lightbar2025Data.colour_kbd4;
+    }
+
+    // --- Front edge (bottom) ---
+    ZoneRow {
+        x: 10px; y: 344px;
+        label: "front_corner_left";
+        zone_colour <=> Lightbar2025Data.colour_front_corner_left;
+    }
+    ZoneRow {
+        x: 140px; y: 344px;
+        label: "front_left";
+        zone_colour <=> Lightbar2025Data.colour_front_bar_left;
+    }
+    ZoneRow {
+        x: 310px; y: 344px;
+        label: "front_right";
+        zone_colour <=> Lightbar2025Data.colour_front_bar_right;
+    }
+    ZoneRow {
+        x: 460px; y: 344px;
+        label: "front_corner_right";
+        zone_colour <=> Lightbar2025Data.colour_front_corner_right;
+    }
+
+    Button {
+        x: 150px; y: 385px;
+        width: 240px;
+        text: "Send to Lightbar (16 zones)";
+        clicked => {
+            Lightbar2025Data.apply_lightbar_2025();
+        }
+    }
+}

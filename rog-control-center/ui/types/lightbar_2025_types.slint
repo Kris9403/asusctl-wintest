@@ -1,0 +1,36 @@
+// G615LR-specific, experimental. Deliberately a completely separate global
+// from AuraPageData (aura_types.slint) -- doesn't share state with the
+// classic AuraEffect colour/effect controls, doesn't touch anything any
+// other laptop's UI reads. Not upstreamed; local-only while the underlying
+// 0x04 protocol is still under investigation, see HANDOFF.md in the
+// asusctl-wintest research repo. Sixteen independent named colour
+// properties (not one array) on purpose -- simpler, more repetitive Slint,
+// but each is a plain property assignment, which is about as low-risk as
+// Slint syntax gets when nobody can compile-check it before committing.
+export global Lightbar2025Data {
+    in-out property <color> colour_kbd1: #000000;
+    in-out property <color> colour_kbd2: #000000;
+    in-out property <color> colour_kbd3: #000000;
+    in-out property <color> colour_kbd4: #000000;
+    in-out property <color> colour_back_left: #000000;
+    in-out property <color> colour_back_right: #000000;
+    in-out property <color> colour_back_corner_left: #000000;
+    in-out property <color> colour_back_corner_right: #000000;
+    in-out property <color> colour_left_bar_back: #000000;
+    in-out property <color> colour_left_bar_front: #000000;
+    in-out property <color> colour_right_bar_back: #000000;
+    in-out property <color> colour_right_bar_front: #000000;
+    in-out property <color> colour_front_corner_left: #000000;
+    in-out property <color> colour_front_corner_right: #000000;
+    in-out property <color> colour_front_bar_left: #000000;
+    in-out property <color> colour_front_bar_right: #000000;
+
+    // Rust-side hex parsing, reuses the exact same conversion logic
+    // AuraPageData.cb_hex_to_colour already uses for the classic colour
+    // picker -- not a separate/new implementation.
+    callback hex_to_colour(string) -> color;
+
+    // Fired when "Send to Lightbar" is clicked. Rust side reads all 16
+    // colour_* properties above and calls write_lightbar_2025_zones.
+    callback apply_lightbar_2025();
+}

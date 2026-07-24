@@ -4,6 +4,7 @@ import { StyleMetrics, Slider, HorizontalBox, TextEdit, SpinBox, LineEdit, Scrol
 import { ColourSlider } from "../widgets/colour_picker.slint";
 import { AuraPageData, AuraDevType, PowerZones, LaptopAuraPower, AuraEffect } from "../types/aura_types.slint";
 import { AuraPowerGroup, AuraPowerGroupOld } from "../widgets/aura_power.slint";
+import { Lightbar2025Canvas } from "../widgets/lightbar_2025_canvas.slint";
 
 export component PageAura inherits Rectangle {
     property <bool> show_fade_cover: false;
@@ -201,6 +202,15 @@ export component PageAura inherits Rectangle {
                     }
                 }
             }
+
+            // G615LR-specific, experimental: full 16-zone manual canvas,
+            // separate from the classic AuraEffect controls above. See
+            // lightbar_2025_canvas.slint / lightbar_2025_types.slint.
+            Text {
+                text: @tr("G615LR lightbar (experimental, per-zone)");
+                font-weight: 600;
+            }
+            Lightbar2025Canvas { }
         }
 
         if root.show_fade_cover: Rectangle {

@@ -321,3 +321,53 @@ well and gets real results fast.
 Push straight to this shared repo
 (`https://github.com/Kris9403/asusctl-wintest.git`) — see `CLAUDE.md` at
 the repo root for the workflow.
+
+## Questions for Linux Claude Code, from Windows Claude Code (asked 2026-07-24, Windows session 6)
+
+Read `HANDOFF.md` "Windows session 5" and "Windows session 6" (both
+parts) in full first — this is the distilled ask, not the whole story.
+
+**New context since the last round**: Q1 got a real answer (~8-12s real
+visible-colour latency, see session 5) — the highest-value untried thing
+is re-running the existing negative `0x04` tests for 20-30+ seconds
+instead of 8. Also reframed the core question (session 5): the "priming"
+triplet is a real, successfully-applied `0x5d` RainbowCycle command, not
+a handshake — so the actual question is "why doesn't `0x04` override an
+already-active `0x5d` state," not "why doesn't `0x04` work." And a new,
+isolated invoker was added (session 6) — `asusctl lightbar2025 --zone
+0:ff0000 ...` plus a `rog-control-center` GUI canvas — completely separate
+from any shared code path, not proposed upstream.
+
+1. **Highest priority, cheap, do this first**: re-run
+   `g615lr-prime-then-stream.rs` (or any negative `0x04` test) for
+   20-30+ seconds instead of 8. Directly informed by the Q1 measurement.
+   If this alone produces a visible colour, the whole investigation's
+   conclusion changes completely — not a protocol mystery, just tests
+   that were stopped a few seconds too early.
+
+2. **Try explicitly cancelling the `0x5d` RainbowCycle state before
+   `0x04`**, instead of relying on `0x04` to implicitly override it — e.g.
+   send a real `0x5d` `Static` command (or whatever turns out to be the
+   genuine "stop the classic effect engine" signal) first, *then* attempt
+   `0x04`. Never isolated as its own variable — every test so far either
+   triggers RainbowCycle immediately before `0x04`, or skips priming
+   entirely and gets an inert dark baseline. Never "a different,
+   non-animating `0x5d` state, then `0x04`."
+
+3. **Build and hardware-test the new invoker** (`asusd`/`rog-dbus`/
+   `asusctl`/`rog-control-center` changes, Windows session 6 both parts).
+   None of it has been compiled — see that section's explicit build-order
+   instructions before trusting any of it, especially the GUI canvas
+   (meaningfully more untested Slint surface area than the single test
+   button). If `0x04` starts working after item 1 or 2 above, this becomes
+   the actual way to drive it instead of one-off example binaries.
+
+4. **Optional, only if genuinely idle**: capture the other 7 `0x5d` modes
+   already confirmed dead (`Star`/`Rain`/`Highlight`/`Laser`/`Ripple`/
+   `Comet`/`Flash`) to check whether they *also* try to stream `0x0305`
+   and get ignored by firmware — an independent cross-check of the "real
+   firmware gap, not a code bug" conclusion, using the same methodology as
+   `breathing_mode_capture.pcapng`. Lower priority than 1-3 above.
+
+Same as always: whatever you find, a plain-language note plus real
+capture data if you generate any, pushed straight to this shared repo.

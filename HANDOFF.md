@@ -1575,3 +1575,56 @@ can fail in ways plain `cargo check` on other crates won't catch), fix
 whatever doesn't compile, then actually run `asusctl lightbar2025 --zone
 0:ff0000` and confirm it round-trips to `write_lightbar_2025_zones` on
 the wire before trusting any of this UI-side.**
+
+## Windows session 6, part 2 -- full 16-zone manual canvas, matching Aura Creator's shape
+
+Same session, prompted by a direct question comparing the single test
+button above against Aura Creator's actual UI (a real interactive
+per-zone canvas, not a fire-a-hardcoded-pattern button). Attempted a
+closer equivalent, same isolation rules as everything else in this
+section -- own files, own global, zero shared state with the classic
+`AuraEffect` controls:
+
+- `rog-control-center/ui/types/lightbar_2025_types.slint` (new) --
+  `Lightbar2025Data` global, **16 separate named colour properties**
+  (`colour_kbd1` .. `colour_front_bar_right`), not one array. Deliberately
+  more repetitive than an array-indexed approach would be, in exchange for
+  every read/write being a plain property access -- the lowest-risk Slint
+  pattern available given none of this can be compile-checked before
+  committing.
+- `rog-control-center/ui/widgets/lightbar_2025_canvas.slint` (new) -- 16
+  independently-named `ZoneRow` elements (swatch + hex `LineEdit` each),
+  absolutely positioned to roughly match the physical layout from
+  `usb_capture_session3/g615lr_zone_map.png` (back edge top, front edge
+  bottom, sides left/right, keyboard middle), plus a "Send to Lightbar"
+  button. Caught and fixed one real layout bug before committing (the send
+  button was initially placed at the same y-coordinate as the front-edge
+  zone row, would have visually overlapped it).
+- `rog-control-center/ui/pages/aura.slint` -- imports and places the new
+  canvas below the existing test button, both kept (one for a known-good
+  one-click sanity check, one for full manual per-zone control).
+- `rog-control-center/src/ui/setup_aura.rs` -- wires `Lightbar2025Data`'s
+  `hex_to_colour` callback (reuses the existing `decode_hex` helper, not a
+  new implementation) and `apply_lightbar_2025` (reads all 16 `colour_*`
+  properties via their Slint-generated getters, builds the
+  `(wire_zone_id, r, g, b)` tuple list in the exact order/IDs
+  `rog_aura::lightbar_2025::Lightbar2025Zone` uses, sends via the same
+  `write_lightbar_2025_zones` D-Bus method the single test button already
+  uses).
+
+**Same honesty caveat as part 1, more so here**: this is meaningfully more
+Slint surface area (16 repeated element blocks, absolute positioning
+math, a new global, new Rust-side getters for 16 properties) than the
+single button, and I have zero ability to preview or compile any of it.
+Every individual piece was checked against a real, working pattern
+already in this codebase (property getters match `get_led_mode_data()`'s
+confirmed convention, `Color::red()/green()/blue()` matches the existing
+`decode_hex`/hex-formatting usage, absolute `x`/`y` positioning matches
+the existing close-button pattern in `aura.slint`) -- but the *composition*
+of 16 of these together, across 3 new/modified files, has no equivalent
+this session could directly copy wholesale. Treat this specifically as
+"reviewed piece-by-piece against known-good patterns," not "confident
+this compiles clean on the first try." If it doesn't build, the layout
+math (the `x`/`y` pixel values in `lightbar_2025_canvas.slint`) is the
+most likely place for a real Slint compiler error to point -- that part
+was hand-calculated, not derived from any working example.
