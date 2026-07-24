@@ -54,6 +54,19 @@ yet.
    If that gap is more than 8 seconds, our test simply didn't run long
    enough and that alone might be the whole answer.
 
+   **ANSWERED (Windows session 5): roughly 8-12 seconds, not near-instant.**
+   Ran the priming+static-hold test as a background task specifically so a
+   live human "NOW" report could be checked against the running script's
+   own timer mid-flight, cross-referenced against a simultaneous capture
+   to establish a clean offset between the two clocks. Real, repeated
+   (5+ successful runs this session), bounded by ordinary human
+   reaction/typing latency (~4-5s uncertainty window), but far more
+   precise than "somewhere in 30-90s." **This directly matters**: every
+   Linux `0x04` streaming test so far used exactly 8 seconds — if the real
+   threshold is genuinely in this range, those tests may simply not have
+   run long enough. Try 20-30+ seconds before concluding anything else.
+   Full derivation in `HANDOFF.md` "Q1 finally answered."
+
 2. **Does the specific pattern of zones being written matter?** Every
    Linux test streamed the exact same single zone (`0x06`) over and over.
    The real capture's steady-state traffic cycles through many different

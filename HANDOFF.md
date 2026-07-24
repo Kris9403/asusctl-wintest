@@ -1430,3 +1430,48 @@ own variable -- every test so far either sends the RainbowCycle-triggering
 triplet immediately before `0x04`, or (Linux's `g615lr-0305-only-stream.rs`)
 skips it entirely and gets a dark/inert baseline instead, never "a
 different, non-animating `0x5d` state, then `0x04`."
+
+## Q1 finally answered: real visible-colour latency is ~8-12 seconds, not near-instant
+
+Same session. Fixed the methodology that kept failing before: ran
+`g615lr_priming_then_static_hold.ps1` **as a background task** instead of
+a blocking foreground call, specifically so the human's "NOW" report could
+arrive and be checked *while the script was still running*, rather than
+only being visible after the whole run (and thus the whole timing window)
+had already completed. A live USBPcap3 capture ran throughout.
+
+**The measurement**: the human reported the corner visibly changing;
+checked the running script's own log at that exact moment and it was at
+its internal `t≈12.66s`. Cross-referenced against the live capture to
+establish a clean, offset-independent timeline: the capture's first
+priming packet (`t=19.81s` in the capture's own clock, since `tshark`
+was started a few seconds before the script) lines up exactly with the
+script's own `t=0.01s` (its first priming send) -- a ~19.8s clock offset
+between the two. Accounting for ordinary human reaction+typing latency
+before the report could be checked (a few seconds, not measured
+precisely), **the real visible colour change happens somewhere around
+8-12 seconds after the `0x04` streaming begins.**
+
+**Why this matters directly**: every Linux `0x04` streaming test so far
+used **8 seconds** (`g615lr-prime-then-stream.rs` and everything built on
+it). If the real threshold is genuinely in the 8-12s range, those tests
+may simply not have run long enough -- not a protocol or platform
+difference at all, just an insufficiently long observation window. This
+was flagged as a real possibility as far back as Linux session 3's "for
+whoever picks this up next" list ("a much longer stream after priming,
+30-60s+, not 8s") but never actually tested with real timing data behind
+it until now.
+
+**Caveats, stated plainly**: this is not a millisecond-precision lab
+measurement -- it's bounded by ordinary message/reaction latency in a
+human-in-the-loop test, roughly a 4-5 second uncertainty window. It is,
+however, real, repeated (this exact test has now visibly succeeded 5+
+times across this session, always within a comparable timeframe going by
+how quickly confirmations came back each time), and vastly more precise
+than the prior state of knowledge ("somewhere in a 30-90 second window,
+never pinned down"). **The clear, high-value next test for Linux**: run
+`g615lr-prime-then-stream.rs` (or any of the other negative `0x04` tests)
+for 20-30+ seconds instead of 8, on the theory that they were stopped
+just before the real threshold rather than testing a genuinely different
+outcome. Cheap to try, directly informed by this measurement, and was
+already on Linux's own "not yet tried" list independently.
