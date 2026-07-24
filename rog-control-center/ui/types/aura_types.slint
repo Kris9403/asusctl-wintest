@@ -168,4 +168,13 @@ export global AuraPageData {
         }]
     };
     callback cb_led_power(LaptopAuraPower);
+
+    // G615LR-specific, experimental: fires a hardcoded test pattern via the
+    // isolated WriteLightbar2025Zones D-Bus method (independent per-zone
+    // chassis lightbar control, protocol 0x04). Deliberately not wired to
+    // any of the colour/effect properties above -- separate mechanism,
+    // separate callback, doesn't touch the shared AuraEffect model. Not
+    // upstreamed; local-only while the underlying protocol is still under
+    // investigation, see HANDOFF.md in the asusctl-wintest research repo.
+    callback cb_lightbar_2025_test();
 }

@@ -41,6 +41,15 @@ pub trait Aura {
     /// DirectAddressingRaw method
     fn direct_addressing_raw(&self, data: AuraLaptopUsbPackets) -> zbus::Result<()>;
 
+    /// WriteLightbar2025Zones method -- G615LR-specific, independent
+    /// per-zone chassis lightbar control (protocol `0x04`). Not part of
+    /// the shared `AuraEffect` model, isolated to this one laptop's
+    /// dedicated method, not upstreamed. `zones` is a flat list of
+    /// `(wire_zone_id, r, g, b)` tuples; see
+    /// `rog_aura::lightbar_2025::Lightbar2025Zone` for valid IDs
+    /// (`0x00-0x0F`).
+    fn write_lightbar_2025_zones(&self, zones: Vec<(u8, u8, u8, u8)>) -> zbus::Result<()>;
+
     /// Brightness property
     #[zbus(property)]
     fn brightness(&self) -> zbus::Result<LedBrightness>;

@@ -187,6 +187,58 @@ pub fn setup_aura_page(
             })
             .ok();
 
+        // G615LR-specific, experimental: fires a hardcoded test pattern via
+        // the isolated WriteLightbar2025Zones D-Bus method. Deliberately
+        // separate from the on_apply_led_mode_data wiring above -- doesn't
+        // touch AuraEffect/led_mode_data at all. Not upstreamed; local-only
+        // while the underlying 0x04 protocol is still under investigation,
+        // see HANDOFF.md in the asusctl-wintest research repo. Test pattern
+        // below is the exact 12 zone/colour pairs already human-confirmed
+        // correct on real hardware (Windows session 3,
+        // usb_capture_session4/multizone_12x_confirmed.pcapng), so a
+        // successful run here has a known-correct result to check against.
+        let p_lightbar = aura.clone();
+        let w_lightbar = handle.clone();
+        handle
+            .upgrade_in_event_loop(move |h| {
+                h.global::<AuraPageData>()
+                    .on_cb_lightbar_2025_test(move || {
+                        let Some(_ui) = w_lightbar.upgrade() else {
+                            return;
+                        };
+                        let p = p_lightbar.clone();
+                        let t = w_lightbar.clone();
+                        tokio::spawn(async move {
+                            // (wire_zone_id, r, g, b) -- see
+                            // rog_aura::lightbar_2025::Lightbar2025Zone for
+                            // what each ID physically is.
+                            let zones: Vec<(u8, u8, u8, u8)> = vec![
+                                (0x00, 0xFF, 0x00, 0x00), // Keyboard1
+                                (0x01, 0x00, 0xFF, 0x00), // Keyboard2
+                                (0x02, 0x00, 0x00, 0xFF), // Keyboard3
+                                (0x03, 0xFF, 0xFF, 0xFF), // Keyboard4
+                                (0x05, 0xFF, 0x00, 0x00), // BackBarLeft
+                                (0x04, 0x00, 0xFF, 0x00), // BackBarRight
+                                (0x07, 0x00, 0x00, 0xFF), // CornerBackLeft
+                                (0x06, 0xFF, 0xFF, 0x00), // CornerBackRight
+                                (0x0C, 0xFF, 0x80, 0x00), // CornerFrontRight
+                                (0x0D, 0xFF, 0xFF, 0xFF), // CornerFrontLeft
+                                (0x0E, 0x00, 0xFF, 0xFF), // FrontBarRight
+                                (0x0F, 0xFF, 0x00, 0xFF), // FrontBarLeft
+                            ];
+                            let r = p.write_lightbar_2025_zones(zones).await;
+                            show_toast(
+                                "Lightbar 2025 test pattern sent".into(),
+                                "Lightbar 2025 test failed".into(),
+                                t,
+                                r,
+                            );
+                        });
+                    });
+            })
+            .map_err(|e| error!("{e}"))
+            .ok();
+
         let weak_power = handle.clone();
         let proxy_power = aura.clone();
         handle

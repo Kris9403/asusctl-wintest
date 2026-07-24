@@ -181,11 +181,23 @@ export component PageAura inherits Rectangle {
             }
 
             HorizontalLayout {
+                spacing: 10px;
                 Button {
                     text: @tr("Power Settings");
                     clicked => {
                         root.show_fade_cover = true;
                         root.show_aura_power = true;
+                    }
+                }
+                // G615LR-specific, experimental: sends a hardcoded test
+                // pattern via the isolated per-zone lightbar method. Not
+                // part of the effect/colour controls above on purpose --
+                // separate mechanism, see aura_types.slint's
+                // cb_lightbar_2025_test doc comment.
+                Button {
+                    text: @tr("Test G615LR Lightbar (experimental)");
+                    clicked => {
+                        AuraPageData.cb_lightbar_2025_test();
                     }
                 }
             }

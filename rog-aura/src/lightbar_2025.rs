@@ -163,6 +163,22 @@ impl Lightbar2025Zone {
     }
 }
 
+impl TryFrom<u8> for Lightbar2025Zone {
+    type Error = &'static str;
+
+    /// Validates a raw wire zone ID (e.g. arriving over D-Bus from the
+    /// G615LR-specific `WriteLightbar2025Zones` method) into a real zone.
+    /// Rejects anything outside `0x00..=0x0F` rather than silently
+    /// wrapping/truncating.
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|z| *z as u8 == value)
+            .ok_or("not a valid Lightbar2025Zone wire ID (expected 0x00-0x0F)")
+    }
+}
+
 /// One (zone, color) pair to set in a single packet.
 #[derive(Debug, Clone, Copy)]
 pub struct Lightbar2025ZoneColour {

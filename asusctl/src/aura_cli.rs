@@ -694,3 +694,69 @@ impl From<&SetAuraBuiltin> for AuraEffect {
         }
     }
 }
+
+// --- G615LR-specific: independent per-zone chassis lightbar control -------
+//
+// Deliberately NOT part of `AuraSubCommand`/`SetAuraBuiltin` above -- this
+// talks to a separate, isolated D-Bus method (`WriteLightbar2025Zones`,
+// see `asusd/src/aura_laptop/trait_impls.rs`) that doesn't touch the
+// shared `AuraEffect` model any other laptop uses. Not proposed upstream;
+// local-only while the underlying `0x04` protocol is still under
+// investigation. See `HANDOFF.md` in the `asusctl-wintest` research repo
+// for the full story, and `rog-aura::lightbar_2025::Lightbar2025Zone` for
+// the 16 valid zone IDs (`0x00-0x0F`).
+
+/// One `zone:RRGGBB` pair from the command line, e.g. `0:ff0000` (zone 0,
+/// red) or `6:00ff00` (zone 6, green). Zone IDs are raw hex/decimal wire
+/// IDs -- see `usb_capture_session3/g615lr_zone_map.png` in the research
+/// repo for the physical layout, or run with an invalid ID to get the
+/// valid range in the error message.
+#[derive(Debug, Clone, Copy)]
+pub struct Lightbar2025ZoneArg {
+    pub zone: u8,
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+}
+
+impl FromStr for Lightbar2025ZoneArg {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (zone_str, hex) = s
+            .split_once(':')
+            .ok_or_else(|| format!("expected `zone:RRGGBB`, got `{s}`"))?;
+        let zone = zone_str
+            .parse::<u8>()
+            .or_else(|_| u8::from_str_radix(zone_str.trim_start_matches("0x"), 16))
+            .map_err(|_| format!("`{zone_str}` is not a valid zone ID (0-15 or 0x00-0x0F)"))?;
+        if hex.len() != 6 {
+            return Err(format!("`{hex}` is not a 6-digit hex colour, e.g. ff0000"));
+        }
+        let r = u8::from_str_radix(&hex[0..2], 16).map_err(|e| e.to_string())?;
+        let g = u8::from_str_radix(&hex[2..4], 16).map_err(|e| e.to_string())?;
+        let b = u8::from_str_radix(&hex[4..6], 16).map_err(|e| e.to_string())?;
+        Ok(Self { zone, r, g, b })
+    }
+}
+
+impl fmt::Display for Lightbar2025ZoneArg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{:02x}{:02x}{:02x}", self.zone, self.r, self.g, self.b)
+    }
+}
+
+/// `asusctl lightbar2025 --zone 0:ff0000 --zone 6:00ff00 ...`
+#[derive(FromArgs, Debug)]
+#[argh(
+    subcommand,
+    name = "lightbar2025",
+    description = "G615LR-specific: independent per-zone chassis lightbar control (experimental, laptop-specific, not part of the shared aura effect model)"
+)]
+pub struct Lightbar2025Command {
+    #[argh(
+        option,
+        description = "one zone:RRGGBB pair, repeatable, e.g. --zone 0:ff0000 --zone 6:00ff00. Zone IDs: 0x00-0x0F, see g615lr_zone_map.png in the research repo"
+    )]
+    pub zone: Vec<Lightbar2025ZoneArg>,
+}

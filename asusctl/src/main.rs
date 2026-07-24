@@ -200,6 +200,7 @@ fn do_parsed(
         CliCommand::Armoury(cmd) => handle_armoury_command(cmd)?,
         CliCommand::Backlight(cmd) => handle_backlight(cmd)?,
         CliCommand::Battery(cmd) => handle_battery(cmd, &conn)?,
+        CliCommand::Lightbar2025(cmd) => handle_lightbar_2025(cmd)?,
         CliCommand::Info(info_opt) => {
             handle_info(info_opt, supported_interfaces, supported_properties)?
         }
@@ -705,6 +706,29 @@ fn handle_led_mode(mode: &LedModeCommand) -> Result<(), Box<dyn std::error::Erro
         }
     }
 
+    Ok(())
+}
+
+/// G615LR-specific: independent per-zone chassis lightbar control
+/// (protocol `0x04`). Deliberately isolated from `handle_led_mode` above --
+/// calls a separate D-Bus method (`WriteLightbar2025Zones`) that doesn't
+/// touch the shared `AuraEffect` model. Not upstreamed; local-only while
+/// the underlying protocol is still under investigation, see `HANDOFF.md`
+/// in the `asusctl-wintest` research repo.
+fn handle_lightbar_2025(
+    cmd: &crate::aura_cli::Lightbar2025Command,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if cmd.zone.is_empty() {
+        println!("Usage: asusctl lightbar2025 --zone 0:ff0000 --zone 6:00ff00 ...");
+        println!("Zone IDs: 0x00-0x0F, see g615lr_zone_map.png in the research repo");
+        return Ok(());
+    }
+    let zones: Vec<(u8, u8, u8, u8)> = cmd.zone.iter().map(|z| (z.zone, z.r, z.g, z.b)).collect();
+    let aura = find_iface::<AuraProxyBlocking>("xyz.ljones.Aura")?;
+    for aura in aura {
+        aura.write_lightbar_2025_zones(zones.clone())?;
+    }
+    println!("Sent {} zone(s)", cmd.zone.len());
     Ok(())
 }
 

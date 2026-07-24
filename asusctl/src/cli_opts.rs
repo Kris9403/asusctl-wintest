@@ -2,7 +2,9 @@ use argh::FromArgs;
 use rog_platform::platform::PlatformProfile;
 
 use crate::anime_cli::AnimeCommand;
-use crate::aura_cli::{LedBrightness, LedPowerCommand1, LedPowerCommand2, SetAuraBuiltin};
+use crate::aura_cli::{
+    LedBrightness, LedPowerCommand1, LedPowerCommand2, Lightbar2025Command, SetAuraBuiltin,
+};
 use crate::fan_curve_cli::FanCurveCommand;
 use crate::scsi_cli::ScsiCommand;
 use crate::slash_cli::SlashCommand;
@@ -29,6 +31,9 @@ pub enum CliCommand {
     Backlight(BacklightCommand),
     Battery(BatteryCommand),
     Info(InfoCommand),
+    /// G615LR-specific, experimental, not part of the shared aura effect
+    /// model -- see `Lightbar2025Command`'s own doc comment.
+    Lightbar2025(Lightbar2025Command),
 }
 
 impl Default for CliCommand {

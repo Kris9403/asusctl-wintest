@@ -229,6 +229,47 @@ impl AuraZbus {
         self.0.write_effect_block(&mut config, &data).await?;
         Ok(())
     }
+
+    /// G615LR-specific: independent per-zone chassis lightbar control
+    /// (protocol `0x04`, `rog_aura::lightbar_2025`). Deliberately **not**
+    /// part of the shared `AuraEffect`/`set_led_mode_data` model used by
+    /// every other laptop -- this is a separate, isolated method so it
+    /// can't affect any other device's behaviour. Not upstreamed/proposed
+    /// to the asusctl project; local-only for this specific laptop while
+    /// the underlying protocol is still under investigation (see
+    /// `HANDOFF.md` in the `asusctl-wintest` research repo).
+    ///
+    /// `zones` is a flat list of `(wire_zone_id, r, g, b)` tuples, any
+    /// length -- batched into <= 8-zone packets here since that's the
+    /// hardware's real per-packet limit
+    /// (`LIGHTBAR_2025_MAX_ZONES_PER_PACKET`). Invalid zone IDs
+    /// (anything outside `0x00-0x0F`) are rejected with an error rather
+    /// than silently dropped or clamped.
+    async fn write_lightbar_2025_zones(
+        &self,
+        zones: Vec<(u8, u8, u8, u8)>,
+    ) -> Result<(), ZbErr> {
+        use rog_aura::lightbar_2025::{Lightbar2025Zone, Lightbar2025ZoneColour, LIGHTBAR_2025_MAX_ZONES_PER_PACKET};
+        use rog_aura::Colour;
+
+        let mut converted = Vec::with_capacity(zones.len());
+        for (zone_id, r, g, b) in zones {
+            let zone = Lightbar2025Zone::try_from(zone_id)
+                .map_err(|e| ZbErr::Failed(format!("zone 0x{zone_id:02X}: {e}")))?;
+            converted.push(Lightbar2025ZoneColour {
+                zone,
+                colour: Colour { r, g, b },
+            });
+        }
+
+        for batch in converted.chunks(LIGHTBAR_2025_MAX_ZONES_PER_PACKET) {
+            self.0.write_lightbar_2025(batch).await.map_err(|e| {
+                warn!("write_lightbar_2025_zones: {e}");
+                ZbErr::Failed(e.to_string())
+            })?;
+        }
+        Ok(())
+    }
 }
 
 impl CtrlTask for AuraZbus {

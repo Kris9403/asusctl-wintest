@@ -1512,3 +1512,66 @@ actual shipped application. Fixing (2) is straightforward, ordinary
 feature work once (1) is solved -- wire a per-zone D-Bus method and a
 GUI control that takes 16 colours instead of 1-2. Not worth doing before
 (1), since there'd be nothing working yet to expose.
+
+## Windows session 6 -- wired up the missing invoker (gap 2 above), isolated from shared code
+
+Written the same session, after the gap above was confirmed. Since it's
+real, useful infrastructure regardless of whether `0x04` currently
+produces a visible effect (and genuinely useful for continued testing --
+a real CLI command beats writing a new `rog-platform/examples/*.rs`
+binary for every test), implemented it now rather than waiting.
+**Deliberately isolated from every shared code path** per explicit
+instruction -- this is local-only, not proposed upstream, scoped to this
+one laptop, and structured so it cannot affect any other device's
+behaviour even accidentally:
+
+- `rog-aura/src/lightbar_2025.rs` -- added `TryFrom<u8> for Lightbar2025Zone`
+  (validates raw wire IDs, rejects anything outside `0x00-0x0F` rather than
+  silently truncating).
+- `asusd/src/aura_laptop/trait_impls.rs` -- new D-Bus method
+  `write_lightbar_2025_zones(&self, zones: Vec<(u8,u8,u8,u8)>)`, added
+  next to (not replacing or modifying) the existing `direct_addressing_raw`
+  method. Converts and validates each `(zone_id, r, g, b)` tuple, batches
+  into <=8-zone groups (the hardware's real per-packet limit), calls the
+  already-existing-but-previously-orphaned `Aura::write_lightbar_2025` for
+  each batch. Does not touch `AuraEffect`, `write_effect_and_apply`, or
+  any code path any other laptop's dispatch uses.
+- `rog-dbus/src/zbus_aura.rs` -- matching proxy trait method
+  (`WriteLightbar2025Zones` on the wire, zbus's standard snake_case ->
+  PascalCase name mapping).
+- `asusctl/src/aura_cli.rs` + `cli_opts.rs` + `main.rs` -- new **top-level**
+  CLI command, `asusctl lightbar2025 --zone 0:ff0000 --zone 6:00ff00 ...`
+  (repeatable `zone:RRGGBB` pairs). Deliberately a new top-level
+  `CliCommand` variant, not nested inside the existing `aura`/
+  `AuraSubCommand` tree, so it's trivially greppable/removable and doesn't
+  risk the shared command surface other laptops' users see.
+- `rog-control-center` -- one new button, "Test G615LR Lightbar
+  (experimental)", next to the existing Power Settings button on the Aura
+  page. Sends a hardcoded test pattern via the new D-Bus method: the exact
+  same 12 zone/colour pairs already human-confirmed correct on real
+  hardware (Windows session 3,
+  `usb_capture_session4/multizone_12x_confirmed.pcapng`), so a successful
+  click has a known-correct result to visually check against, not an
+  arbitrary pattern. New Slint callback (`cb_lightbar_2025_test`) kept
+  completely separate from `led_mode_data`/the colour-slider wiring --
+  doesn't share state with the effect controls above it.
+
+**Honesty check, same as every other Rust change from this side of the
+investigation**: none of this has been compiled. Windows can't build this
+workspace at all (Linux-only `udev` dependency). Reviewed carefully
+against real, confirmed patterns already in the codebase for every
+piece -- the D-Bus error variant used (`ZbErr::Failed`) was cross-checked
+against its actual usage elsewhere in this exact file rather than assumed
+(an earlier draft used `ZbErr::InvalidArgs`, which doesn't appear
+anywhere else in this codebase and was swapped out rather than risking
+it); `Colour`'s field names, the `Aura`/`AuraZbus` wrapping pattern, the
+proxy macro's naming convention, and the Slint callback/button pattern
+were all matched against existing working examples in the same files,
+not guessed. But "carefully reviewed" is not "compiled," let alone
+"tested on hardware." **First thing to do on the Linux side: `cargo
+check -p rog_aura -p asusd -p rog-dbus -p asusctl`, then
+`cargo build -p rog-control-center` separately (Slint code generation
+can fail in ways plain `cargo check` on other crates won't catch), fix
+whatever doesn't compile, then actually run `asusctl lightbar2025 --zone
+0:ff0000` and confirm it round-trips to `write_lightbar_2025_zones` on
+the wire before trusting any of this UI-side.**
