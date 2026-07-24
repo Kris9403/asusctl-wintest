@@ -1475,3 +1475,40 @@ for 20-30+ seconds instead of 8, on the theory that they were stopped
 just before the real threshold rather than testing a genuinely different
 outcome. Cheap to try, directly informed by this measurement, and was
 already on Linux's own "not yet tried" list independently.
+
+## Confirmed, real, separate gap: the actual application has no per-zone invoker at all
+
+Prompted by a direct question, verified against source rather than
+assumed. `write_lightbar_2025` (`asusd/src/aura_laptop/mod.rs`) is
+referenced **exactly once in the entire codebase -- its own definition.**
+No D-Bus method, no CLI subcommand, no GUI control calls it, anywhere.
+
+Traced what `rog-control-center`'s actual UI does when a mode tile is
+clicked (`rog-control-center/src/ui/setup_aura.rs`): its only "zone"
+concept is `PowerZones::Keyboard` / `PowerZones::Lightbar` /
+`PowerZones::KeyboardAndLightbar` -- coarse *device-capability* flags
+(does this laptop have a keyboard, a lightbar, or both, used to decide
+which power-state toggles to show), not per-LED addressing of any kind.
+Every effect selection converts to a single `rog_aura::AuraEffect` (the
+1-2 colour, whole-device struct already known from earlier sessions) and
+flows into `write_effect_and_apply` -- the `0x5d` protocol, always,
+regardless of which mode tile was clicked. **There is no code path
+anywhere in this repo's actual user-facing application that could reach
+`Lightbar2025Zone`/`0x04` control, even in principle.**
+
+**Important, don't conflate this with the hardware mystery above**: every
+single `0x04` test that produced a negative result this whole
+investigation (`g615lr-lightbar-test.rs` through
+`g615lr-literal-12zone-replay.rs`) calls `rog_platform::hid_raw::HidRaw`'s
+raw transport functions **directly**, bypassing `rog-control-center` and
+`asusd`'s dispatch layer entirely -- same real bytes hitting the real USB
+wire, zero GUI/CLI/D-Bus involvement. So this confirmed dispatch gap is
+real and worth fixing eventually, but it is **not** why those tests fail
+-- those tests never touch this code at all. Two separate, both-real
+problems: (1) the low-level `0x04` protocol doesn't produce a visible
+effect for reasons still under investigation above, and (2) even if it
+did, there's currently no way for a real user to invoke it through the
+actual shipped application. Fixing (2) is straightforward, ordinary
+feature work once (1) is solved -- wire a per-zone D-Bus method and a
+GUI control that takes 16 colours instead of 1-2. Not worth doing before
+(1), since there'd be nothing working yet to expose.
