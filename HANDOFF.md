@@ -1628,3 +1628,40 @@ this compiles clean on the first try." If it doesn't build, the layout
 math (the `x`/`y` pixel values in `lightbar_2025_canvas.slint`) is the
 most likely place for a real Slint compiler error to point -- that part
 was hand-calculated, not derived from any working example.
+
+### Final cross-check before handing this off (Windows session 6, part 3)
+
+Did a dedicated pass specifically to verify the invoker addition (parts 1
+and 2 above) before calling it done, rather than just re-reading it.
+Actually grepped/diffed rather than eyeballing:
+
+- **D-Bus method name** (`write_lightbar_2025_zones`) spelled identically
+  across all 6 definition/call sites (`rog-dbus` trait, `asusd` impl, both
+  GUI callback sites, CLI, error message). Confirmed via grep, not memory.
+- **All 16 Slint property names** (`colour_kbd1` .. `colour_front_bar_right`)
+  match character-for-character across the types file, the canvas widget,
+  and the Rust getters -- no typos, confirmed via grep across all three
+  files simultaneously.
+- **The zone-ID mapping itself, the actual safety-critical part** -- both
+  hardcoded `(wire_id, r, g, b)` tuple lists (the single test button and
+  the canvas's send-all) cross-checked byte-for-byte against the
+  authoritative `Lightbar2025Zone` enum values and the
+  `matches_human_confirmed_capture` test table. All 16 correct in both
+  places. This is the one check worth trusting most -- everything else is
+  "will it compile," this is "will it send the right bytes to the right
+  zone if it does."
+- No naming collisions between the two new Slint files and anything
+  already in `rog-control-center/ui/`.
+
+**One real gap surfaced, not buried**: the CLI's `Vec<Lightbar2025ZoneArg>`
+for the repeated `--zone` flag has **zero precedent anywhere else in this
+codebase** -- every other `argh` option here takes a single value, so
+there was nothing local to cross-check the "repeat a flag, each
+occurrence parses and appends to a `Vec`" pattern against. `argh` documents
+this as supported, and it's a standard, common pattern for the crate, but
+it's the one piece of this whole addition that couldn't be verified
+against something already proven to compile in this exact repo, the way
+everything else was. **If the build fails, check this and the hand-
+calculated canvas layout math (previous section) first** -- those are the
+two specific, named places most likely to be the actual problem, not a
+vague "something in the new code."
