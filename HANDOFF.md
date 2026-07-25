@@ -2082,6 +2082,163 @@ node). Still zero visible effect. Rules out stale-node ambiguity as an
 explanation too -- this negative result holds with zero possible doubt
 about which node was actually written to.
 
+## BREAKTHROUGH (2026-07-25, still later same session): a THIRD protocol,
+already implemented in this repo for sibling hardware, actually works.
+
+Dug into the repo itself rather than guessing new bytes, per direct
+instruction. Found `rog-aura/src/keyboard/advanced.rs`'s `LedUsbPackets`
+-- a complete, real, ALREADY-IMPLEMENTED "custom mode" protocol: `0x5d`
+with mode byte `0xbc` (distinct from `0xb3` "builtin", used for every
+"priming"/effect-apply this whole session). `get_init_msg()`'s own doc
+comment: "Initialise and clear the keyboard for custom effects, this
+must be done every time mode switches from builtin to custom." Never
+sent once this entire investigation.
+
+**The smoking gun**: G615LR's own `aura_support.ron` entry has
+`layout_name: "g634j-per-key"` -- it already explicitly references the
+G634J per-key layout. G634J and G635L (closest sibling models, same
+generation, same `basic_modes`/`power_zones`) both have `advanced_type:
+PerKey`, meaning they already get real per-key/zoned direct addressing
+through this exact mechanism. G615LR's `advanced_type` was simply left
+as `r#None` -- nobody had ever tried routing it through this
+already-working path. All prior investigation focused entirely on the
+separate `0x04` protocol.
+
+**Tested directly** (`rog-platform/examples/g615lr-perkey-zoned-protocol.rs`):
+sent the real init message (`5d bc 00...`), then `LedUsbPackets::new_zoned(true)`'s
+packet format (`5d bc 01 01 04...`) with all 4 keyboard zones
+(`ZonedKbLeft/LeftMid/RightMid/Right`, offsets 9/12/15/18) and all 6
+lightbar codes (`LightbarRight/RightCorner/RightBottom/LeftBottom/
+LeftCorner/Left`, offsets 27/30/33/36/39/42) set to distinct colours.
+
+**Result: keyboard zones lit up correctly, independently, for the first
+time all session.** Lightbar codes did not light (unlike the classic
+`0x5d b3` zone1/zone4 "bleeds into lightbar" bug -- this time it's a
+clean non-response, not a wrong-zone bleed, suggesting the 6-lightbar-
+code addressing this protocol uses for G634J/G635L's hardware simply
+doesn't map onto G615LR's actual lightbar wiring, consistent with
+G615LR likely having a genuinely different, more granular 16-zone
+lightbar that needs the separate `0x04` protocol specifically -- the
+existing doc comment on G615LR's `aura_support.ron` entry may have been
+right about that part all along, just wrong to conclude the KEYBOARD
+side needed `0x04` too.
+
+**Corrected course before testing true per-key**: G615LR is a genuine
+4-zone backlit keyboard, not per-key RGB hardware (`basic_zones:
+[Key1,Key2,Key3,Key4]`, and directly confirmed by the user) -- there is
+no physical way for 90+ individual keys to display different colours on
+wiring that's only ever split into 4 zones. Skipped the full per-key
+test as physically meaningless for this hardware; pivoted to more
+targeted follow-ups instead.
+
+**Custom-mode-init immediately before `0x04`, tested and refuted**: given
+`5d bc` (custom mode) just proved real and working for keyboard zones,
+tested whether `0x04` shares the same prerequisite -- real custom-mode
+init, then the same wire-verified-correct `0x04` alpha-ramp stream.
+Zero effect, same as every other combination.
+
+**Power-zone-disabled theory, refuted from already-captured data (no new
+hardware test needed)**: decoded the real kernel restore command
+captured earlier tonight (`5d bd 01 aa 1e 00 00`) against
+`LaptopAuraPower`'s documented bit layout (`rog-aura/src/keyboard/
+power.rs`). `aa`=Keyboard boot/awake/sleep/shutdown all on, Logo all off
+(correct, no logo). `1e`=**Lightbar boot/awake/sleep/shutdown ALL ON
+too** -- already fully powered by the device's own remembered defaults,
+restored automatically. Not a disabled-power-zone issue.
+
+**Physical wiring explanation for the classic-protocol zone1/zone4
+lightbar-bleed finding from earlier tonight**: the classic `0x5d b3`
+protocol addresses a whole physical LED *strip* by a single zone byte
+(no per-LED-position addressing); the newer `0x5d bc` custom-mode
+protocol has distinct byte positions for `ZonedKbLeft` vs
+`LightbarLeft`/etc (genuine per-position addressing within a chain).
+That difference explains the bleed exactly: kbd1's LEDs and the entire
+left lightbar chain are almost certainly on the same physical
+addressable-LED daisy-chain (kbd4 + right lightbar likewise), with
+zones 2/3 on their own separate short chain. A whole-strip-only protocol
+necessarily lights the entire chain; a position-addressed protocol can
+target just one LED's position within it -- consistent with kbd1 lighting
+in isolation under `0x5d bc` tonight. Matches the physical zone map too
+(kbd1 sits at the leftmost keyboard position, adjacent to where the left
+lightbar chain begins).
+
+**Scoped, safety-conscious brute force of the `0x5d bc` byte-position
+space, tested and exhausted**: user asked directly whether this risks
+bricking anything -- answered no, provided report ID (`0x5d`) and mode
+byte (`0xbc`) are held constant and only the RGB-value byte *position*
+varies; this stays entirely within the already-proven-safe "set LED
+colour" command space, never touches a different report ID/subcommand
+(sleep/power controls, etc -- the only real risk category). Built and
+ran two sweeps:
+- `g615lr-bruteforce-offset.rs`: every plausible 3-byte-aligned offset
+  (5-61, the maximum possible within a single 64-byte packet) in the
+  `new_zoned()` packet, skipping the known-working keyboard offsets.
+  **Nothing.**
+- `g615lr-bruteforce-row11.rs`: extended past the single-packet limit
+  using real code-grounded leads -- `new_per_key()` only allocates 11
+  packet rows (indices 0-10), but its own `rgb_for_led_code` match arms
+  reference row 11 for every lightbar/lid `LedCode` in non-zoned mode
+  (out-of-bounds, never actually reachable in the existing code -- this
+  path was never finished upstream). Swept row 10 (the one legitimately-
+  allocated row never tried) at all its own column positions, then
+  manually constructed the referenced-but-never-built "group 11" packet
+  and tested the EXACT column positions the existing code already points
+  at for `LightbarRight/RightCorner/RightBottom/LeftBottom/LeftCorner/
+  Left` and `LidLogo/LidLeft/LidRight`. **Nothing.**
+
+This closes out the reasonably-guessable `0x5d bc` byte-position search
+space. Every offset within the single zoned packet, the one real spare
+per-key row, and the exact positions the existing (incomplete) code
+itself pointed at for lightbar/lid have all been tried. Whatever
+addresses G615LR's actual lightbar under this protocol family -- if
+anything does -- is not in the parts of the byte space explored tonight.
+
+**Extended further** (`g615lr-bruteforce-allgroups.rs`): swept the
+previously-untested group values 12-15 (the group byte at offset 6 is
+`group << 4`, a 4-bit field -- 15 is the maximum possible value, fully
+novel territory) plus every unmapped/undocumented offset within groups
+0-9 (the other per-key rows, skipping only the positions already
+documented as real keyboard keys in `rgb_for_led_code`). User observed,
+live: groups 0, 12, 13, 14, and 15 all produced the IDENTICAL result --
+the same 4 keyboard zones lighting up whenever the offset was 9/12/15/18,
+regardless of group value. Combined with groups 10/11 showing the same
+pattern earlier, this spans effectively the entire possible group-byte
+range (0-15) with a consistent, well-evidenced result.
+
+**Conclusion**: G615LR's EC firmware almost certainly ignores the group
+byte entirely for this protocol. It physically can't implement true
+per-key/per-row addressing -- the hardware only has 4 zones' worth of LED
+circuitry (`basic_zones: [Key1,Key2,Key3,Key4]`) -- so it very likely
+just always reads a fixed set of byte positions (9/12/15/18) as "the 4
+zone colours," no matter what group/row value a packet claims to target.
+The group byte is a vestige of the shared protocol definition used by
+genuine per-key models (G634J/G635L), carried over but functionally
+inert on this board. This also explains every negative result in this
+whole `0x5d bc` brute-force effort at once: every other offset in every
+group corresponds to individual-key LED data that simply doesn't exist
+as physical hardware here -- not a wrong guess, just no LED to address.
+
+**Strongest implication**: the lightbar is very likely not reachable
+through `0x5d bc` in ANY group or offset -- the keyboard EC that handles
+this protocol almost certainly has no wiring to the lightbar at all,
+consistent with it being a physically separate controller chip. This
+closes out the `0x5d bc` protocol family as a path to the lightbar
+specifically; further brute-forcing this exact byte space is unlikely to
+find it. Reinforces that `0x04` (or a still-undiscovered protocol) really
+is the correct track for the lightbar, independent of tonight's real win
+on the keyboard-zone side.
+
+**Real hazard recurrence, noted for future sessions**: the ~6-minute
+`g615lr-bruteforce-allgroups.rs` sweep got interrupted mid-run (Ctrl+C),
+which killed the built-in keyboard again -- `SIGINT` terminates the
+process immediately without unwinding the stack, so even the `Drop`-based
+`RestoreGuard` never runs (that only fires on a clean return or a panic,
+not a signal kill). Fixed the same way as before (`echo -n "5-4:1.0" |
+sudo tee /sys/bus/usb/drivers/usbhid/bind`, same for `5-4:1.1`). Worth
+adding a `Ctrl+C` signal handler to these long-running examples in a
+future session so this stops recurring on any interrupted run, not just
+panics.
+
 **Also worth relaying**: a real, live Linux capture of classic-protocol
 GUI mode switching (`testtt.pcapng`, RainbowWave -> Pulse via
 `rog-control-center`) confirmed `write_effect_and_apply` genuinely never
