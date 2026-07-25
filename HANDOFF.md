@@ -1665,3 +1665,41 @@ everything else was. **If the build fails, check this and the hand-
 calculated canvas layout math (previous section) first** -- those are the
 two specific, named places most likely to be the actual problem, not a
 vague "something in the new code."
+
+## Linux session 5 -- 40s continuous stream test: a subtle flicker, matching the reframing exactly
+
+Directly acted on Windows session 5's two findings. Built
+`g615lr-literal-30s-stream.rs` (continuously re-sends all 16 literal
+zone bytes from `multizone_12x_confirmed.pcapng`, real priming first, for
+40 seconds instead of the 8s every prior test used) to test the newly-
+measured 8-12s latency window with real continuous streaming rather than
+a one-shot burst. ~2750 full 16-packet cycles sent over 40s (i.e.
+`0x0304` writes going out about as fast as the transport allows, far
+faster than any natural refresh rate).
+
+**Result: a subtle flicker in the RainbowCycle animation, synced to every
+packet write, for the entire 40 seconds -- never resolving to a real
+colour.** Human-observed, careful watching required to catch it, but
+real and consistent with every single write attempt, the whole run.
+**This is strong, direct evidence for Windows session 5's reframing**:
+`0x04` writes are not being silently ignored -- each one visibly perturbs
+the display for an instant -- but the EC's own RainbowCycle animation
+engine has an internal refresh loop that overwrites the LED buffer again
+on its very next tick, before the `0x04` write can persist. Streaming
+faster or longer doesn't help, because the competing refresh loop never
+stops running in the first place -- there's no race to win, `0x04` always
+loses the very next frame.
+
+**This makes the next test unambiguous**, and it's exactly what Windows
+session 5 already flagged as untried: explicitly *cancel* the active
+`0x5d` RainbowCycle state (a real, non-animated `Static` `0x5d` command)
+*before* attempting `0x04`, instead of relying on `0x04` to implicitly
+override an animation that's still actively running. Every test so far
+either triggers RainbowCycle via the priming triplet immediately before
+`0x04`, or skips the triplet and gets an inert dark baseline -- never "a
+real, deliberately non-animating `0x5d` state, confirmed settled, then
+`0x04`."
+
+Pivoting to compiling and testing Windows session 6's dispatch-wiring
+code (D-Bus method, CLI, GUI canvas) before further raw-hardware
+iteration, per direct instruction.

@@ -67,6 +67,18 @@ yet.
    run long enough. Try 20-30+ seconds before concluding anything else.
    Full derivation in `HANDOFF.md` "Q1 finally answered."
 
+   **TESTED (Linux session 5): 40-second continuous stream tried, revealed
+   something more precise than a simple timeout.** Not a silent failure —
+   a subtle flicker synced to every single `0x04` write, for the entire
+   40s, never resolving. Directly confirms Windows session 5's reframing:
+   the writes ARE landing, but RainbowCycle's own animation refresh loop
+   overwrites the buffer again on its next tick, every time — there's no
+   timing threshold to wait out, because the competing loop never stops.
+   Next test (per Windows session 5's own "not yet tested" note): cancel
+   the `0x5d` RainbowCycle state explicitly (real `Static`) before
+   attempting `0x04`, instead of relying on `0x04` to override an
+   animation still actively running. See `HANDOFF.md` "Linux session 5."
+
 2. **Does the specific pattern of zones being written matter?** Every
    Linux test streamed the exact same single zone (`0x06`) over and over.
    The real capture's steady-state traffic cycles through many different
