@@ -1681,7 +1681,15 @@ faster than any natural refresh rate).
 packet write, for the entire 40 seconds -- never resolving to a real
 colour.** Human-observed, careful watching required to catch it, but
 real and consistent with every single write attempt, the whole run.
-**This is strong, direct evidence for Windows session 5's reframing**:
+**Important clarification from direct observation**: the rainbow did NOT
+restart/reset its cycle at each flicker -- it kept smoothly progressing
+through its own animation exactly as if uninterrupted, just visibly
+perturbed for an instant each time. This means the RainbowCycle engine's
+internal state/timing is entirely independent of and unaware of the
+`0x04` writes -- it isn't reacting to them at all (no reset, no pause), it
+is simply redrawing over them on its own fixed schedule, and the flicker
+is only the brief window between our write landing and its next scheduled
+redraw. **This is strong, direct evidence for Windows session 5's reframing**:
 `0x04` writes are not being silently ignored -- each one visibly perturbs
 the display for an instant -- but the EC's own RainbowCycle animation
 engine has an internal refresh loop that overwrites the LED buffer again
@@ -1703,3 +1711,49 @@ real, deliberately non-animating `0x5d` state, confirmed settled, then
 Pivoting to compiling and testing Windows session 6's dispatch-wiring
 code (D-Bus method, CLI, GUI canvas) before further raw-hardware
 iteration, per direct instruction.
+
+## Linux session 5, continued -- compiled and tested Windows session 6's dispatch wiring
+
+**Compiled clean, essentially on the first try.** `cargo check -p rog_aura
+-p asusd -p rog_dbus -p asusctl` succeeded immediately, no errors at all.
+`cargo build -p rog-control-center` (the Slint GUI) hit exactly one error:
+`Lightbar2025Data` wasn't re-exported from `main_window.slint` (every
+other Slint global visible to Rust via `include_modules!()` has an
+explicit `import`+`export` pair there; the new file added the type but
+the top-level re-export line was missed). One-line fix, matching the
+existing `AuraPageData` pattern exactly. Both flagged risk areas from
+Windows' own review (`argh`'s `Vec<T>` repeated-`--zone` flag, the
+hand-calculated Slint canvas layout math) compiled correctly with zero
+issues -- the one real bug was somewhere neither flag pointed at.
+
+**Installed and tested the new CLI command through the real dispatch
+path** (`asusctl lightbar2025 --zone <id>:<hex>`) for the first time --
+every previous `0x04` test this whole investigation went through raw
+`rusb`/`HidRaw` directly, bypassing `asusd`'s D-Bus layer entirely. First
+attempt looked promising (whole chassis turned static red after
+installing+restarting `asusd`) but turned out to be a red herring, same
+shape as the earlier false-alarm regression: `asusd` restarting
+re-applied a *cached* `Static` red config from earlier in this session via
+the classic `0x5d` protocol (which lights the whole chassis as one unit),
+completely unrelated to the new command. Re-tested cleanly: dark reset
+first (confirmed silent/no visible change), then *only*
+`asusctl lightbar2025 --zone 0:00ff00` with nothing else in between.
+**Result: `"Sent 1 zone(s)"`, no error, and zero visible effect.**
+
+**This is a genuinely useful negative result, not a wasted test**: it
+rules out "maybe the raw test binaries were doing something subtly wrong
+that the real application dispatch path avoids." The full, real,
+production code path -- D-Bus method, `Aura::write_lightbar_2025`,
+`HidRaw::set_feature_report`, same `HIDIOCSFEATURE` ioctl every raw test
+also used -- produces the exact same nothing. The dispatch-wiring gap
+(Windows session 6's actual contribution) is now closed and confirmed
+working end-to-end; the underlying `0x04`/RainbowCycle-override mystery
+(Linux session 5's flicker finding, Windows session 5's reframing) is
+completely unaffected by it, as expected, since both ultimately hit the
+same hardware behavior.
+
+**Next test, unchanged from before this detour**: cancel the `0x5d`
+RainbowCycle state explicitly (real `Static`) before attempting `0x04`,
+rather than relying on `0x04` to override a still-actively-animating
+state. Now has a real CLI command to test it through if useful, though
+the raw test binaries remain equally valid for this.

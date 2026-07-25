@@ -134,9 +134,29 @@ entirely.
   never actually combining the two. Not yet known whether this is a real
   firmware gap or a still-missing prerequisite — see `HANDOFF.md` Linux
   session 4 and `QUESTIONS.md`.
-- ❓ **`0x04` remains unsolved.** Every independently-testable-on-Linux
-  hypothesis has now been tried and ruled out (packet content, length,
-  transport, interface, timing, batching, `0x0305` combinations, zone
-  variety). Q1 (precise priming→visible-colour latency, Windows-side) is
-  the highest-value remaining open question — see `QUESTIONS.md`'s
-  Linux-session-4 questions for where this stands and what's needed next.
+- 🎯 **`0x04` reframed and sharply narrowed (2026-07-24, Windows session 5
+  + Linux session 5).** The "priming" `5d b3/b4/b5` triplet is not a
+  handshake — it's a real, successfully-applied `0x5d set-effect
+  (RainbowCycle) + apply` command. The actual question was never "why
+  doesn't `0x04` work," it's **"why doesn't `0x04` override an
+  already-active `0x5d` RainbowCycle animation."** Direct evidence: a
+  40-second continuous `0x04` stream produces a subtle flicker synced to
+  *every single write* — the writes ARE landing, but RainbowCycle's own
+  animation refresh loop overwrites the buffer again on its very next
+  tick, every time, without ever resetting its own cycle (confirmed by
+  direct observation: the rainbow just keeps smoothly progressing through
+  its animation, unaware of the writes). No timing threshold to wait out —
+  the competing loop never stops running in the first place. **Next test**:
+  explicitly cancel the `0x5d` RainbowCycle state (real `Static`) before
+  attempting `0x04`, instead of relying on `0x04` to override a still-
+  active animation — flagged by Windows, not yet tried by either side.
+- ✅ **Real dispatch wiring for `0x04` now exists and works end-to-end**
+  (Windows session 6, compiled+fixed+tested Linux session 5): a D-Bus
+  method (`WriteLightbar2025Zones`), a CLI command
+  (`asusctl lightbar2025 --zone <id>:<hex>`), and a GUI 16-zone canvas —
+  all previously orphaned, now reachable by a real user. One compile fix
+  needed (a missing Slint re-export, one line). Tested live: round-trips
+  cleanly (`"Sent 1 zone(s)"`, no error) but — as expected, since it hits
+  the same hardware — produces the same zero visible effect as every raw
+  test. Useful, real infrastructure; does not itself change the underlying
+  mystery above.
