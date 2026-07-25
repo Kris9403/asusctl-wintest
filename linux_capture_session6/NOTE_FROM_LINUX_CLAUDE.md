@@ -33,3 +33,30 @@ verified on Linux rather than judged by eye alone -- rules out "packets
 silently dropped/coalesced before the wire" as an explanation. Whatever's
 still missing is confirmed firmware/device-side, not a Linux transport or
 packet-construction bug.
+
+## `kernel_reprobe_real_init_sequence.pcapng`
+
+Accidental but major: re-ran the corner-no-priming test with Wireshark
+running, and when the test released the USB interface at the end, the
+kernel's own `hid_asus` driver reprobed the device normally -- captured
+its ENTIRE real init sequence for the first time all session: `0x5a`
+query, `0x5a`/`0x5d`/`0x5e` "ASUS Tech.Inc." handshakes (all three, in
+that order -- confirms the external maintainer's claim precisely), the
+recurring `5a ba c5 c4 03` mystery packet, then the kernel restoring
+Static-blue and power-state settings via real `0x5d` SET/APPLY. Every raw
+`rusb` test all session called `detach_kernel_driver()` first, which
+means this real sequence never ran during any test itself -- only after
+release. See `HANDOFF.md` "Linux session 6" for the full byte breakdown.
+
+## `hidraw_fresh_lookup_wire_verified.pcapng`
+
+Immediate follow-up: sent a single `0x04` write via `HIDIOCSFEATURE` on
+`/dev/hidraw2` (interface 1) moments after the real reprobe above
+completed -- kernel driver never detached this time, matching the actual
+production code path (`Aura::write_lightbar_2025`) exactly, device
+freshly and properly initialized. Wire-verified correct (`04 01 01 0d
+00...ff 00 00 ff`). Still zero effect. Re-ran once more with the target
+node resolved fresh via udev immediately before writing (rules out a
+stale-hidraw-node theory raised mid-session, since every reprobe creates
+a new node and a hardcoded number could go stale) -- also wire-verified
+correct, also zero effect.

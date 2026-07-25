@@ -2018,6 +2018,70 @@ init/"direct mode" command, matching NeroReflex's original claim, or
 something the Windows pre-init capture will reveal) rather than anything
 fixable by changing what/when we send from the Linux userspace side.
 
+**Accidental but major discovery (2026-07-25, still later same session):
+captured the kernel's own real init sequence for the first time.** When
+`g615lr-corner-no-priming.rs` was re-run with a live Wireshark capture
+running, releasing the interface at the end (via `RestoreGuard`) let the
+kernel's `hid_asus` driver reprobe the device normally -- and Wireshark
+caught its ENTIRE real initialization sequence, live, for the first time
+all session:
+```
+5a d0 4e 01                              (query)
+5a "ASUS Tech.Inc."                      (0x5a handshake)
+5a 05 20 31 00 08 / 5a ec 02 00 00 00    (status + ack)
+5d "ASUS Tech.Inc."                      (0x5d handshake)
+5e "ASUS Tech.Inc."                      (0x5e handshake -- the one that fails)
+5a ba c5 c4 03                           (recurring mystery packet, seen before)
+5d b3 00 00 00 00 eb...                  (restore Static blue, real SET/APPLY order)
+5d bd 01 aa 1e 00 00                     (restore power states, matches set_power_states' exact format)
+```
+Confirms NeroReflex's claim precisely -- `0x5a`, `0x5d`, AND `0x5e` are
+all genuinely attempted by the real driver, in that order. Critical
+realization: **every raw `rusb` test this entire session called
+`detach_kernel_driver()` first**, which means this real sequence never
+ran during any of them -- detaching the kernel driver prevents it from
+running at all. Every prior negative result happened on a device that
+never got its real handshake treatment during the test itself (only
+whatever happened at actual system boot, hours earlier, in a completely
+different context).
+
+**Immediately tested the obvious implication**: sent a single `0x04`
+write via the exact production path (`HIDIOCSFEATURE` ioctl on
+`/dev/hidraw2`, kernel driver NOT detached at all) moments after this
+real reprobe completed -- device genuinely freshly initialized, real
+handshakes just finished, using the same access method
+`Aura::write_lightbar_2025` actually uses in the shipped code. **Zero
+visible effect, same as every other test.**
+
+This closes the last remaining open variable. Full list of things
+independently tested and ruled out this session: packet construction
+(byte-exact match against Windows' own captures), wire transmission
+(Wireshark-verified reaching the device correctly), priming vs. no
+priming, static vs. genuinely-animated changing frames, keyboard zone vs.
+lightbar zone, and now kernel-driver-detached vs. kernel-driver-attached
+via the real production dispatch path. None of them change the outcome.
+This is about as exhaustive as Linux-side testing can get without new
+external evidence -- strong confirmation this is not a Linux dispatch/
+sequencing/packet bug of any kind. The remaining gap is confirmed to be
+either the still-failing `0x5e` handshake genuinely gating something we
+haven't identified, or a command/sequence neither side has captured yet
+-- the Windows pre-init capture (asked in `QUESTIONS.md`) remains the
+most promising untried source of new evidence.
+
+**Stale-hidraw-node possibility raised and ruled out.** Good catch mid-
+session: the manual `HIDIOCSFEATURE` test above hardcoded `/dev/hidraw2`
+from an earlier check, but every reprobe cycle creates a fresh HID device
+instance -- a hardcoded node number could go stale if another reprobe
+happened in between, silently writing to a disconnected/zombie device
+instead of the live one. Re-ran with the interface-1 node resolved fresh
+via udev immediately before writing (exactly matching
+`HidRaw::new_with_interface`'s own dynamic lookup, never a hardcoded
+path), captured live with Wireshark. Wire confirms the packet reached the
+device correctly (`04 01 01 0d 00...ff 00 00 ff`, `SET_REPORT`, correct
+node). Still zero visible effect. Rules out stale-node ambiguity as an
+explanation too -- this negative result holds with zero possible doubt
+about which node was actually written to.
+
 **Also worth relaying**: a real, live Linux capture of classic-protocol
 GUI mode switching (`testtt.pcapng`, RainbowWave -> Pulse via
 `rog-control-center`) confirmed `write_effect_and_apply` genuinely never
