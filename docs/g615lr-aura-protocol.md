@@ -1,5 +1,19 @@
 # ROG Strix G16 (2025) / G615LR Aura Lighting — Reverse-Engineered Protocol
 
+**STALE DOCUMENT NOTICE (2026-07-25)**: this file is a snapshot from the
+very first, Windows-only phase of this investigation, written before any
+Linux hardware testing had happened. Several of its claims are now known
+to be WRONG based on extensive later testing — most importantly, the
+"Report ID `0x5d` does NOT produce any visible effect" conclusion below
+has been definitively refuted (5 of 12 built-in modes confirmed working
+live on Linux: Static, Breathe, RainbowCycle, RainbowWave, Pulse). Treat
+this file as historical context only. The authoritative, continuously
+updated source of truth is `HANDOFF.md` (and `CLAUDE.md` for the current-
+state summary) in the `asusctl-wintest` research repo — read those
+first, not this file, for anything current. Left in place rather than
+deleted since the report-`0x04` packet-format documentation below is
+still accurate and useful.
+
 This laptop's RGB lighting is **not** documented anywhere (not in `asusctl`,
 not in the Linux `asus-wmi` driver, not anywhere on asus-linux.org as of this
 writing). Armoury Crate talks to it through an undocumented USB HID

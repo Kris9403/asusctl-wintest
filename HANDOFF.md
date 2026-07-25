@@ -2281,6 +2281,30 @@ lightbar, if anything on this exact wire, must go through a report ID
 already known about (most likely still `0x04`), not an undiscovered
 device elsewhere on the bus.
 
+**One more AniMe angle checked and ruled out concretely**: `rog-anime`
+has a "STRIX-class" (G635L/G835L) variant using report `0x5e` as a REAL
+data protocol (`[0x5e, 0xc0, 0x02, START_LO, START_HI, LEN_LO, LEN_HI]` +
+raw colour data, addressing an 810-LED matrix) -- briefly looked
+extremely promising, since G635L is one of G615LR's closest siblings and
+this would have explained why our `0x5e` handshake doesn't echo like
+`0x5a`/`0x5d` (if `0x5e` were actually this different data protocol, not
+a handshake, on our hardware too). Ruled out on closer inspection:
+`PROD_ID` in `rog-anime/src/usb.rs` is a fixed constant (`0x193b`)
+regardless of which `AnimeType` board is detected -- even for STRIX-class
+G635L, this protocol only ever talks to the separate AniMe display panel
+device, never the N-Key keyboard device our lightbar lives on. Same dead
+end as AniMe generally, just reached from a more specific angle; not
+tested against hardware given this doesn't apply to a `19b6`-only system.
+
+**Fixed a real accuracy problem while digging**: `docs/g615lr-aura-
+protocol.md` is a stale snapshot from the very first Windows-only phase
+of this investigation (predates any Linux hardware testing) and still
+claimed report `0x5d` "does NOT produce any visible effect" -- flatly
+contradicted by this session's confirmed-working whole-chassis modes.
+Added a stale-document notice pointing to `HANDOFF.md`/`CLAUDE.md` as
+the authoritative source, left the file in place since its `0x04` packet
+format documentation is still accurate.
+
 **Real hazard recurrence, noted for future sessions**: the ~6-minute
 `g615lr-bruteforce-allgroups.rs` sweep got interrupted mid-run (Ctrl+C),
 which killed the built-in keyboard again -- `SIGINT` terminates the
