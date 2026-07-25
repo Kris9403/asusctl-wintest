@@ -39,7 +39,7 @@ component ZoneRow inherits Rectangle {
         }
         LineEdit {
             font-size: 9px;
-            text: root.label;
+            placeholder-text: root.label;
             edited(text) => {
                 root.zone_colour = Lightbar2025Data.hex_to_colour(text);
             }
@@ -123,12 +123,12 @@ export component Lightbar2025Canvas inherits Rectangle {
         zone_colour <=> Lightbar2025Data.colour_kbd2;
     }
     ZoneRow {
-        x: 130px; y: 195px;
+        x: 130px; y: 205px;
         label: "kbd3";
         zone_colour <=> Lightbar2025Data.colour_kbd3;
     }
     ZoneRow {
-        x: 228px; y: 195px;
+        x: 228px; y: 205px;
         label: "kbd4";
         zone_colour <=> Lightbar2025Data.colour_kbd4;
     }

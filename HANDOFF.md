@@ -1665,3 +1665,273 @@ everything else was. **If the build fails, check this and the hand-
 calculated canvas layout math (previous section) first** -- those are the
 two specific, named places most likely to be the actual problem, not a
 vague "something in the new code."
+
+## Linux session 5 -- 40s continuous stream test: a subtle flicker, matching the reframing exactly
+
+Directly acted on Windows session 5's two findings. Built
+`g615lr-literal-30s-stream.rs` (continuously re-sends all 16 literal
+zone bytes from `multizone_12x_confirmed.pcapng`, real priming first, for
+40 seconds instead of the 8s every prior test used) to test the newly-
+measured 8-12s latency window with real continuous streaming rather than
+a one-shot burst. ~2750 full 16-packet cycles sent over 40s (i.e.
+`0x0304` writes going out about as fast as the transport allows, far
+faster than any natural refresh rate).
+
+**Result: a subtle flicker in the RainbowCycle animation, synced to every
+packet write, for the entire 40 seconds -- never resolving to a real
+colour.** Human-observed, careful watching required to catch it, but
+real and consistent with every single write attempt, the whole run.
+**Important clarification from direct observation**: the rainbow did NOT
+restart/reset its cycle at each flicker -- it kept smoothly progressing
+through its own animation exactly as if uninterrupted, just visibly
+perturbed for an instant each time. This means the RainbowCycle engine's
+internal state/timing is entirely independent of and unaware of the
+`0x04` writes -- it isn't reacting to them at all (no reset, no pause), it
+is simply redrawing over them on its own fixed schedule, and the flicker
+is only the brief window between our write landing and its next scheduled
+redraw. **This is strong, direct evidence for Windows session 5's reframing**:
+`0x04` writes are not being silently ignored -- each one visibly perturbs
+the display for an instant -- but the EC's own RainbowCycle animation
+engine has an internal refresh loop that overwrites the LED buffer again
+on its very next tick, before the `0x04` write can persist. Streaming
+faster or longer doesn't help, because the competing refresh loop never
+stops running in the first place -- there's no race to win, `0x04` always
+loses the very next frame.
+
+**This makes the next test unambiguous**, and it's exactly what Windows
+session 5 already flagged as untried: explicitly *cancel* the active
+`0x5d` RainbowCycle state (a real, non-animated `Static` `0x5d` command)
+*before* attempting `0x04`, instead of relying on `0x04` to implicitly
+override an animation that's still actively running. Every test so far
+either triggers RainbowCycle via the priming triplet immediately before
+`0x04`, or skips the triplet and gets an inert dark baseline -- never "a
+real, deliberately non-animating `0x5d` state, confirmed settled, then
+`0x04`."
+
+Pivoting to compiling and testing Windows session 6's dispatch-wiring
+code (D-Bus method, CLI, GUI canvas) before further raw-hardware
+iteration, per direct instruction.
+
+## Linux session 5, continued -- compiled and tested Windows session 6's dispatch wiring
+
+**Compiled clean, essentially on the first try.** `cargo check -p rog_aura
+-p asusd -p rog_dbus -p asusctl` succeeded immediately, no errors at all.
+`cargo build -p rog-control-center` (the Slint GUI) hit exactly one error:
+`Lightbar2025Data` wasn't re-exported from `main_window.slint` (every
+other Slint global visible to Rust via `include_modules!()` has an
+explicit `import`+`export` pair there; the new file added the type but
+the top-level re-export line was missed). One-line fix, matching the
+existing `AuraPageData` pattern exactly. Both flagged risk areas from
+Windows' own review (`argh`'s `Vec<T>` repeated-`--zone` flag, the
+hand-calculated Slint canvas layout math) compiled correctly with zero
+issues -- the one real bug was somewhere neither flag pointed at.
+
+**Installed and tested the new CLI command through the real dispatch
+path** (`asusctl lightbar2025 --zone <id>:<hex>`) for the first time --
+every previous `0x04` test this whole investigation went through raw
+`rusb`/`HidRaw` directly, bypassing `asusd`'s D-Bus layer entirely. First
+attempt looked promising (whole chassis turned static red after
+installing+restarting `asusd`) but turned out to be a red herring, same
+shape as the earlier false-alarm regression: `asusd` restarting
+re-applied a *cached* `Static` red config from earlier in this session via
+the classic `0x5d` protocol (which lights the whole chassis as one unit),
+completely unrelated to the new command. Re-tested cleanly: dark reset
+first (confirmed silent/no visible change), then *only*
+`asusctl lightbar2025 --zone 0:00ff00` with nothing else in between.
+**Result: `"Sent 1 zone(s)"`, no error, and zero visible effect.**
+
+**This is a genuinely useful negative result, not a wasted test**: it
+rules out "maybe the raw test binaries were doing something subtly wrong
+that the real application dispatch path avoids." The full, real,
+production code path -- D-Bus method, `Aura::write_lightbar_2025`,
+`HidRaw::set_feature_report`, same `HIDIOCSFEATURE` ioctl every raw test
+also used -- produces the exact same nothing. The dispatch-wiring gap
+(Windows session 6's actual contribution) is now closed and confirmed
+working end-to-end; the underlying `0x04`/RainbowCycle-override mystery
+(Linux session 5's flicker finding, Windows session 5's reframing) is
+completely unaffected by it, as expected, since both ultimately hit the
+same hardware behavior.
+
+**Next test, unchanged from before this detour**: cancel the `0x5d`
+RainbowCycle state explicitly (real `Static`) before attempting `0x04`,
+rather than relying on `0x04` to override a still-actively-animating
+state. Now has a real CLI command to test it through if useful, though
+the raw test binaries remain equally valid for this.
+
+## Linux session 5, continued -- cancel-RainbowCycle test run, plus a second real bug found and fixed
+
+**Ran `g615lr-cancel-rainbow-then-04.rs`** (prime into RainbowCycle -> wait
+2s -> explicitly cancel with a real, proven-working `Static` `0x5d`
+command, `b3,b5,b4` order -> wait 2s -> stream the literal 16-zone `0x04`
+bytes for 20s). **Result, human-observed**: RainbowCycle visibly started
+around the 2s mark (confirming priming), then **the cancel step
+genuinely worked -- the chassis went dark**, confirming for the first
+time that RainbowCycle's animation loop CAN be deliberately stopped on
+command, not just raced against. But then: **the entire 20-second `0x04`
+streaming phase produced zero visible effect of any kind -- not even the
+flicker seen in every prior test.** Stayed uniformly dark the whole time,
+and remained dark after streaming stopped.
+
+**This is a different, more specific failure mode than before, and
+narrows the theory further.** Every prior streaming test (with
+RainbowCycle left running) showed a flicker on every write -- direct
+evidence the writes were landing and being displayed for an instant.
+This test, with RainbowCycle genuinely stopped first, shows *no* flicker
+at all -- not "writes land but get overwritten," but "writes produce no
+visible output whatsoever." Working theory, not yet confirmed: the EC's
+LED output may not be a simple "buffer + continuous refresh" model where
+`0x04` writes a colour and *something* keeps displaying it -- it may be
+that display only happens as a side effect of an ACTIVE `0x5d`
+mode's own refresh tick reading whatever's currently in the shared colour
+buffer. With no mode actively ticking, nothing ever reads that buffer, so
+`0x04` writes go in but are never displayed at all, however briefly. This
+would mean the flicker isn't "briefly winning" against a competing
+writer -- it's the *only* mechanism by which anything gets displayed at
+all, and it depends on some *other* active mode still running underneath.
+
+**Second real, independently-fixable bug found and fixed this session**,
+via a direct `aura_manager.rs` code audit (not hardware testing): `asusd`'s
+`DeviceManager::init_all_hid` deliberately deduplicates hidraw interfaces
+to only the *first* one enumerated per USB parent device (comment: avoids
+a USB reset loop on hardware with genuinely redundant interfaces). For
+G615LR, this is wrong -- interface 0 and interface 1 are NOT redundant,
+they speak different protocols entirely, and the dedup logic happened to
+keep interface 0 (confirmed via `journalctl`: `self.hid`'s writes were
+landing on `/dev/hidraw1`, `bInterfaceNumber 00`, the classic-`0x5d`-only
+interface). This meant the new `write_lightbar_2025_zones` D-Bus method
+(Windows session 6) could **never** have reached the right interface,
+independent of the RainbowCycle question entirely -- a second, separate,
+real bug. **Fixed**: added `HidRaw::new_with_interface(id_product,
+interface_number)` (`rog-platform/src/hid_raw.rs`) matching by both
+`idProduct` and `bInterfaceNumber` instead of first-match; changed
+`Aura::write_lightbar_2025` to open its own dedicated handle targeting
+interface 1 explicitly every call, instead of using the shared,
+dedup-affected `self.hid`. Compiles clean. Not yet verified live at time
+of writing -- in progress, see next section if one exists, or `git log`
+for the actual install+test commit.
+
+**Important scoping note**: this interface-binding fix only affects the
+*new* CLI/D-Bus dispatch path. Every raw-`rusb` test binary in this repo
+(`g615lr-*.rs`) already explicitly targeted interface 1 correctly via
+`claim_interface(1)` -- so this bug does not explain any of the raw-test
+negative results, including the cancel-then-stream darkness above. It's a
+real, separate, worthwhile fix for the shipped application, but the core
+protocol mystery is unaffected by it and was already being tested
+correctly all along.
+
+**Confirmed live, through the real (now correctly-wired) dispatch path**:
+dark baseline (`asusctl aura effect static -c 000000`, confirmed dark),
+then `asusctl lightbar2025 --zone 0:00ff00` alone -- **zero visible
+effect, stayed dark.** Identical outcome to the raw-`rusb`
+cancel-then-stream test, now independently reproduced through the actual
+application with the interface bug fixed. Two independent transports
+(raw USB, real D-Bus dispatch) now agree: against a non-actively-animating
+baseline, `0x04` writes are completely invisible, not just overwritten.
+This is strong, twice-confirmed support for the "display only happens as
+a side effect of an active mode's own refresh tick" theory above.
+
+## Linux session 6 (2026-07-25)
+
+**New external input**: user relayed a Discord conversation with
+asus-linux maintainer "NeroReflex", who claimed (a) the N-Key device is
+actually 3 HID devices, only one of which ("the vendor one") accepts
+`0x04`; (b) the `0x5a`/`0x5e`/`0x5d` identification handshake is *not*
+the missing piece ("every modern kernel sends this... no problem"); (c)
+what's actually missing is a distinct "go to direct mode" command,
+separate from any mode-selection packet.
+
+**Checked (a) directly against this exact hardware.** `lsusb -d
+0b05:19b6 -v` already showed `bNumInterfaces=2` (contradicting "3 HID
+devices" at the USB level). To rule out a 3rd HID *collection* hidden
+inside one of the 2 known interfaces (common for vendor multi-collection
+HID devices), dumped and fully parsed both raw report descriptors --
+`/sys/bus/hid/devices/0003:0B05:19B6.0006/report_descriptor` (interface
+0) and `...0007/report_descriptor` (interface 1), both world-readable, no
+sudo needed. Wrote a small standalone HID item parser
+(`scratchpad/hid_parse.py`, not committed -- throwaway tool) since no
+`hidrd`/similar was installed; first pass had the Main-item tag bits
+wrong (used 0-4 instead of the correct 0x8-0xC for
+Input/Output/Collection/Feature/EndCollection) and produced garbage,
+fixed and reran.
+
+**Result: confirmed exactly 2 HID devices, matching `lsusb`.**
+- Interface 0 (`0006`): 9 separate top-level Application collections --
+  boot keyboard (report 1), the `0x5a` handshake, the classic `0x5d`
+  effect protocol, consumer control (report 2), and others. Notably has
+  its own, *unrelated* Report ID `0x04` under Usage Page 0x1 / Usage 0x80
+  (System Control, sleep/wake buttons, usage range 0x81-0x83) -- a pure
+  numeric coincidence with the lightbar's Report ID 0x04 on the other
+  interface; don't confuse the two if grepping captures for "04" near
+  interface 0 traffic.
+- Interface 1 (`0007`): exactly ONE top-level Application collection
+  (Usage Page `0x59`, non-standard/vendor), with report IDs 1 through 6
+  all nested inside it as Logical sub-collections. This is the actual
+  single "vendor" collection NeroReflex described -- it's just not a
+  separate USB interface or HID device on this SKU/firmware, it's this
+  one hidraw node (matches everything tried so far: interface 1 was
+  already the right target throughout this whole investigation).
+
+**New lead found inside that single collection: Report ID `0x06`, never
+tried before.**
+```
+ReportID = 0x6
+Usage = 0x70
+  Usage = 0x71, LogicalMin=0, LogicalMax=1, ReportSize=8, ReportCount=1, Feature
+```
+A single-byte Feature report with a boolean logical range (0/1), its own
+report ID, sitting right next to `0x04`'s zone-colour report and `0x05`
+(a smaller, structurally similar report -- Usage 0x60, 4 zones instead of
+8, same `0x51/0x52/0x53/0x54` per-zone usage pattern as `0x04` -- an
+apparent second, smaller batch-write variant, also never tried). `0x06`'s
+shape -- tiny, boolean, colocated with the zone writes -- matches
+NeroReflex's "go to direct mode" description closely enough to be worth
+testing before anything else.
+
+Report IDs 2 and 3 on the same interface (Usage 0x20/0x21, 0x22-0x2d)
+look structurally like profile/DPI-style settings (typical of ASUS's
+shared ROG vendor HID protocol across mice and keyboards) -- lower
+priority, not obviously related to lighting.
+
+**Action taken**: wrote `rog-platform/examples/g615lr-directmode-report6.rs`
+-- GET_FEATURE report 6 (see the real current value first), SET_FEATURE
+it to 1, GET_FEATURE again to confirm the write landed, then stream the
+same known-good literal `0x04` zone packets used in every prior test, on
+a clean dark baseline (deliberately *not* priming RainbowCycle first, to
+keep the already-confirmed animation-overwrite confound out of this
+result). Compiles clean, ran live.
+
+**Result: hypothesis refuted as tested.** `SET_IDLE iface1` stalled
+(`Err(Pipe)`, consistent with prior sessions -- task #5, still unexplained
+but apparently harmless, Windows doesn't need it either per earlier
+findings). `GET_FEATURE report 6` stalled both before *and* after the
+write (`Err(Pipe)`, buf stayed all-zero) -- this report ID doesn't support
+GET_REPORT, or `0x0306` isn't the right wValue for reading it back; can't
+confirm the write's effect via readback either way. `SET_FEATURE report 6
+= 01` itself succeeded cleanly (`Ok(2)`, no stall -- the device accepted
+the write at the transport level). Then streamed the known-good `0x04`
+zone packets for 10s (631 full cycles) on top of it: **zero visible
+effect, nothing at all** -- same outcome as every non-animating baseline
+tried before. Naive "just flip it to 1 once" version of the direct-mode
+hypothesis does not work as tried.
+
+**Reassessing after this failure, per systematic-debugging**: this is
+roughly the 7th-8th independent hypothesis to fail against the same
+symptom (priming variants, cancel-then-stream, pulse-then-stream,
+`0x0305` alone/parallel, 8-zone batch, the interface-binding fix through
+real dispatch, now report 6). That pattern -- many different plausible
+mechanisms, all producing the identical "nothing happens" result -- points
+away from "we haven't found the right byte yet" and toward "we're
+guessing at a sequence we've never actually observed." Every capture in
+this repo, including `multizone_12x_confirmed.pcapng`, starts *after*
+Windows' real vendor driver (Armoury Crate's service) has already put the
+device into whatever state makes `0x04` take effect -- none of them show
+device *enumeration*/*initialization* itself. NeroReflex's own words
+support exactly this: "probably because the driver is sending it way
+before you start wireshark." **The actual missing evidence isn't another
+guessed report ID -- it's a capture of the real init sequence itself.**
+Concretely: on Windows, disable then re-enable the ASUS N-Key device in
+Device Manager *while* Wireshark/USBPcap is already running, so the
+capture catches full enumeration + whatever the driver sends immediately
+after, not just steady-state traffic. This can only be done from the
+Windows side (Linux's `hid-generic`/`hid_asus` has no knowledge of this
+vendor protocol to replicate). Asked in `QUESTIONS.md`.

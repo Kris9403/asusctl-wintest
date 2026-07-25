@@ -95,6 +95,87 @@ impl HidRaw {
         )))
     }
 
+    /// Like `new()`, but matches by BOTH `idProduct` and a specific USB
+    /// `bInterfaceNumber`, instead of returning the first hidraw node with
+    /// a matching `idProduct` regardless of which interface it belongs to.
+    ///
+    /// Needed for devices exposing multiple HID interfaces under one
+    /// `idProduct` where a specific interface matters -- e.g. the G615LR,
+    /// where interface 0 speaks the classic `0x5d` protocol and interface
+    /// 1 speaks the newer per-zone `0x04`/`0x0305` lightbar protocol.
+    /// `asusd`'s own `DeviceManager` (see `aura_manager.rs`) deliberately
+    /// deduplicates to only the first-enumerated hidraw interface per USB
+    /// parent device (to avoid a USB reset loop on other hardware with
+    /// truly redundant interfaces) -- for a device like this one where the
+    /// two interfaces are NOT redundant, that first-match interface may
+    /// not be the one a particular caller actually needs. This constructor
+    /// lets a caller ask for the specific interface it requires directly,
+    /// independent of whichever interface `DeviceManager` happened to keep.
+    pub fn new_with_interface(id_product: &str, interface_number: &str) -> Result<Self> {
+        let mut enumerator = udev::Enumerator::new().map_err(|err| {
+            warn!("{}", err);
+            PlatformError::Udev("enumerator failed".into(), err)
+        })?;
+
+        enumerator.match_subsystem("hidraw").map_err(|err| {
+            warn!("{}", err);
+            PlatformError::Udev("match_subsystem failed".into(), err)
+        })?;
+
+        for endpoint in enumerator
+            .scan_devices()
+            .map_err(|e| PlatformError::IoPath("enumerator".to_owned(), e))?
+        {
+            let Some(usb_device) = endpoint
+                .parent_with_subsystem_devtype("usb", "usb_device")
+                .map_err(|e| {
+                    PlatformError::IoPath(endpoint.devpath().to_string_lossy().to_string(), e)
+                })?
+            else {
+                continue;
+            };
+            let Some(usb_interface) = endpoint
+                .parent_with_subsystem_devtype("usb", "usb_interface")
+                .map_err(|e| {
+                    PlatformError::IoPath(endpoint.devpath().to_string_lossy().to_string(), e)
+                })?
+            else {
+                continue;
+            };
+            let Some(dev_node) = endpoint.devnode() else {
+                continue;
+            };
+            let Some(this_id_product) = usb_device.attribute_value("idProduct") else {
+                continue;
+            };
+            if this_id_product != id_product {
+                continue;
+            }
+            let Some(this_interface_number) = usb_interface.attribute_value("bInterfaceNumber")
+            else {
+                continue;
+            };
+            if this_interface_number != interface_number {
+                continue;
+            }
+            return Ok(Self {
+                file: RefCell::new(OpenOptions::new().read(true).write(true).open(dev_node)?),
+                devfs_path: dev_node.to_owned(),
+                prod_id: this_id_product.to_string_lossy().into(),
+                syspath: endpoint.syspath().into(),
+                _device_bcd: usb_device
+                    .attribute_value("bcdDevice")
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .parse()
+                    .unwrap_or_default(),
+            });
+        }
+        Err(PlatformError::MissingFunction(format!(
+            "hidraw dev {id_product} interface {interface_number} not found"
+        )))
+    }
+
     /// Make `HidRaw` device from a udev device
     pub fn from_device(endpoint: Device) -> Result<Self> {
         if let Some(parent) = endpoint

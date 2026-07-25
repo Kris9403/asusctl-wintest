@@ -142,17 +142,27 @@ impl Aura {
     /// per-zone colour-channel swap table in `Lightbar2025Zone::needs_grb_swap`
     /// is itself still unresolved (see that method's doc comment) -- fix
     /// that before trusting colours out of this call to be correct.
+    ///
+    /// Deliberately does NOT use `self.hid` -- `aura_manager.rs`'s
+    /// `DeviceManager` dedupes hidraw interfaces per USB parent device,
+    /// keeping only the first-enumerated one, which on this hardware is
+    /// interface 0 (the classic `0x5d`-only interface, confirmed live via
+    /// `journalctl` showing `self.hid` writes landing on `/dev/hidraw1`,
+    /// `bInterfaceNumber 00`). The `0x04`/`0x0305` protocol lives on
+    /// interface 1 only. Opens its own dedicated handle via
+    /// `HidRaw::new_with_interface`, targeting interface 1 explicitly,
+    /// every call -- independent of whatever `self.hid` was bound to.
     pub async fn write_lightbar_2025(
         &self,
         zones: &[Lightbar2025ZoneColour],
     ) -> Result<(), RogError> {
-        if let Some(hid_raw) = &self.hid {
-            let packet = build_lightbar_2025_packet(zones);
-            hid_raw.lock().await.set_feature_report(&packet)?;
-            Ok(())
-        } else {
-            Err(RogError::NoAuraKeyboard)
-        }
+        let hid_raw = HidRaw::new_with_interface("19b6", "01").map_err(|e| {
+            log::warn!("G615LR lightbar: couldn't open interface 1 hidraw: {e}");
+            RogError::NoAuraKeyboard
+        })?;
+        let packet = build_lightbar_2025_packet(zones);
+        hid_raw.set_feature_report(&packet)?;
+        Ok(())
     }
 
     pub async fn set_brightness(&self, value: u8) -> Result<(), RogError> {
