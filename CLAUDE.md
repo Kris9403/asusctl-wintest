@@ -160,3 +160,22 @@ entirely.
   the same hardware — produces the same zero visible effect as every raw
   test. Useful, real infrastructure; does not itself change the underlying
   mystery above.
+- 🔍 **Report-descriptor audit + a new hypothesis, tested negative
+  (2026-07-25, Linux session 6).** An external maintainer's "3 HID
+  devices, only the vendor one accepts `0x04`" claim was checked directly
+  against this hardware by fully parsing both interfaces' raw HID report
+  descriptors — does **not** hold here, confirmed exactly 2 HID devices
+  (matches `lsusb`). Found and tested a genuinely new lead inside
+  interface 1's single vendor collection — Report ID `0x06`, a
+  boolean-shaped Feature report never tried before, structurally
+  resembling a "direct mode" toggle. **Tested, negative**: the write
+  succeeds transport-wise but a 10s `0x04` stream on top still produces
+  zero visible effect. This is now ~7-8 independently-failed hypotheses
+  against the same symptom — per systematic debugging, that pattern means
+  we're guessing at an init sequence we've never actually *observed*, not
+  narrowing in on the right byte. **Asked Windows (QUESTIONS.md) for the
+  one piece of evidence neither side has captured yet**: a Wireshark/
+  USBPcap capture that starts *before* device init — disable/re-enable
+  the device in Device Manager while capturing — to see the real
+  enumeration + init sequence Armoury Crate's driver sends, instead of
+  steady-state traffic from an already-initialized session.
