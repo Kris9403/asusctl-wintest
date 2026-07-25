@@ -160,6 +160,16 @@ entirely.
   the same hardware — produces the same zero visible effect as every raw
   test. Useful, real infrastructure; does not itself change the underlying
   mystery above.
+- ✅ **Windows pre-init capture finally done (2026-07-25, Windows session
+  7), Linux session 6's ask answered.** Real disable/re-enable of the
+  `MI_01` HID collection caught a live `0x5d` "ASUS Tech.Inc." handshake
+  for the first time on Windows — matches Linux's kernel-reprobe capture
+  where they overlap. But no `0x5a`, no `0x5e`, and no distinct
+  "direct mode" command found; traffic just resumed the same `0x0305`
+  RainbowCycle stream after the handshake. Real, useful negative — the
+  full three-way handshake (`0x5a`+`0x5d`+`0x5e`) still hasn't been
+  captured live on Windows, only on Linux's full bus-level reprobe. See
+  `HANDOFF.md` Windows session 7, `QUESTIONS.md`.
 - 🔍 **Report-descriptor audit + a new hypothesis, tested negative
   (2026-07-25, Linux session 6).** An external maintainer's "3 HID
   devices, only the vendor one accepts `0x04`" claim was checked directly

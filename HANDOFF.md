@@ -2372,3 +2372,102 @@ test itself with a `Drop`-based `RestoreGuard` that reattaches both
 interfaces' kernel drivers unconditionally, even during a panic unwind --
 worth retrofitting onto every other `g615lr-*.rs` raw-`rusb` example that
 detaches kernel drivers, since every one of them has the same latent risk.
+
+## Windows session 7 (2026-07-25) -- the pre-init capture Linux asked for, finally done
+
+Answered Linux session 6's `QUESTIONS.md` ask directly: capture the real
+device init/enumeration sequence on Windows, which no capture in this
+repo had ever shown live before now (only Linux's kernel-reprobe capture
+had, and that's a different OS's driver stack).
+
+**Method note for future sessions**: `USBPcapCMD.exe` run with no
+arguments to interactively list devices hangs forever waiting on stdin
+when launched through a non-interactive tool -- don't do that, kill it
+immediately if it happens (it can leave the USBPcap driver in a bad state
+that makes every subsequent `tshark -i "\\.\USBPcapN"` capture fail with
+"File type is neither a supported pcap nor pcapng format (magic =
+0x00000000), 0 packets captured" until the stuck process is killed).
+Also: **never force-kill (`taskkill /F`) a live `tshark -w` capture** --
+it discards the buffered pcapng data, leaving only the 288-byte section
+header with zero packets. Always give `tshark` a fixed `-a duration:N`
+so it exits and flushes on its own.
+
+**First attempt, real negative result**: restarted "ASUS AURA SYNC
+lighting service" (`LightingService`, the actual Windows service that
+owns the vendor HID protocol) while capturing on the correct interface
+(`USBPcap3` -- root hub numbering shifted again, `USBPcap1`/`USBPcap2`
+both captured zero ASUS traffic this session, matching the known
+instability). **Result: no handshake at all.** The capture shows a plain
+device redescribe (`GET_DESCRIPTOR` x3, standard enumeration boilerplate)
+immediately followed by the SAME already-known `0x0305` `SET_REPORT
+Feature ReportID=5` stream resuming (`05 01 00 00 0f 00 ff 00 00 [phase
+byte]`, ~60ms cadence, only the last byte changing -- RainbowCycle's own
+free-running hue counter), byte-for-byte identical before and after the
+restart, sampled across the whole ~35s window. A driver-service restart
+does NOT trigger the real init handshake -- confirms that handshake is
+tied to actual device-level (re)connection, not to the userspace service
+process restarting.
+
+**Second attempt, the real thing**: Device Manager, disabled then
+re-enabled the SPECIFIC HID collection carrying the vendor protocol
+(`HID\VID_0B05&PID_19B6&MI_01\...`, "HID-compliant device", the one
+matching Linux's own interface-1 report-descriptor parse from session 6
+-- confirmed isolated from the physical keyboard/mouse, which live under
+the separate `MI_00` composite subtree and correctly showed "Disable"
+greyed out when tried first). Captured live on `USBPcap3` across the
+whole cycle.
+
+**Result: a real, live-captured `0x5d` handshake, the first time this
+exact sequence has been caught on the Windows side rather than inferred**
+-- fired twice, back-to-back:
+```
+5d bf 00 00 00 00 00...                         (query)
+5d 41 53 55 53 20 54 65 63 68 2e 49 6e 63 2e...  ("ASUS Tech.Inc.")
+5d 05 20 31 00 10 00...                          (status)
+5d 05 20 31 00 10 03 01 01 02 25 05 01 02 46...  (extended status, interrupt IN)
+5d ec 02 00 00 00                                (ack, interrupt IN)
+```
+Plus a genuine `GET_DESCRIPTOR(String)` read returning `"ASUSTek
+Computer Inc."` (UTF-16LE) -- a real enumeration-level request, not
+something a driver would fabricate in software alone. This matches Linux
+session 6's kernel-reprobe `0x5d` block structurally, byte for byte on
+the parts that overlap.
+
+**But**: no `0x5a` query/handshake anywhere in the capture, no `0x5e`
+handshake anywhere, and -- the actual thing we were hoping to find --
+**no distinct "go to direct mode" command**. Searched the full 552-packet
+capture for any `SET_REPORT` to report `0x04` or `0x06` (the two
+candidates from Linux session 6): neither appears. Once the `0x5d`
+handshake block finished, traffic went straight back into the identical
+`0x0305` RainbowCycle stream, same structure as every other capture this
+whole investigation. No lightbar write, no toggle, nothing new.
+
+**Interpretation**: disabling/re-enabling a single HID collection
+(interface 1 only, not the whole composite USB device) is evidently
+enough to make the driver/service layer notice and replay ITS OWN `0x5d`
+init sequence in software, but is not the same as the full bus-level
+re-enumeration Linux's kernel reprobe caught (which showed `0x5a` AND
+`0x5d` AND `0x5e`, all three). If `0x5a`/`0x5e` only fire on a genuine
+hardware-level bus reset across the whole composite device, disabling
+just one child collection may not be enough to trigger them -- the
+`0x04` prerequisite, if there is one, might specifically live inside
+whatever `0x5a` or `0x5e` are supposed to accomplish and never got a
+chance to run here.
+
+**Real, honest conclusion**: this closes out "has Windows ever captured
+its own real init sequence" (yes, now it has, and it matches Linux's
+capture where they overlap) but does NOT close out the underlying
+mystery -- no direct-mode command was found, and the two most complete
+handshakes (`0x5a`, `0x5e`) still remain uncaught on Windows in this
+exact scenario. **Suggested next step for whichever side picks this up**:
+try disabling the WHOLE composite USB device (not just the MI_01
+collection) via Device Manager's "Devices by connection" view, if
+Windows permits it without also dropping the physical keyboard for an
+unacceptable duration -- that would be the closer match to what actually
+produced `0x5a`/`0x5e` on Linux's kernel reprobe.
+
+Capture: `usb_capture_session6/pcap3_real_disable_enable.pcapng`
+(45s window, 552 packets, `USBPcap3`). The earlier LightingService-restart
+capture was a real negative result too but wasn't retained as a raw file
+-- the finding (byte-for-byte identical `0x0305` stream, no handshake) is
+fully described above instead.
