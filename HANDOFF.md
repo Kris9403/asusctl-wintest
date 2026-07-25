@@ -1988,6 +1988,36 @@ confirmed to be firmware/device-side, not a transport or software bug on
 the Linux side. Strengthens the case for the still-pending Windows
 pre-init capture being the actual remaining path forward.
 
+**Follow-up, maximally isolated (2026-07-25, still later same session):
+priming/animation-engine hypothesis space now definitively closed.**
+Built two more tests, asusd fully stopped, NO `0x5d` priming triplet at
+all (so the classic animation engine is never triggered into
+RainbowCycle or anything else -- removes the confound every other `0x04`
+test this session has had), each with an explicit real dark reset
+(Static black, zone=None, non-priming order) to confirm a clean starting
+baseline:
+- `g615lr-corner-no-priming.rs`: front-left corner (wire `0x0D`,
+  `CornerFrontLeft`, a real lightbar zone not keyboard), ramping-alpha
+  stream (483 frames, same wire-verified-correct shape as the alpha-ramp
+  test above).
+- `g615lr-kbd1-static-no-priming.rs`: kbd1 (wire `0x00`), constant static
+  green, alpha always 0xFF, identical packet repeated 75 times (the
+  "classic" single-shot style every prior test this whole investigation
+  used, before the alpha-ramp discovery).
+
+**Both failed -- zero visible effect on either.** This closes out the
+priming/animation-engine hypothesis space definitively: every
+combination of {primed / never primed} x {static constant / ramping
+alpha} x {keyboard zone / lightbar zone} has now been tried, and none of
+them produce any effect. Notably, this argues AGAINST the remaining gap
+being a Linux-side sequencing/software bug specifically -- every
+sequencing variable within our control has been varied, independently,
+repeatedly, with no change in outcome. Strengthens the case that
+whatever's missing is a genuine firmware-side gate (an undiscovered
+init/"direct mode" command, matching NeroReflex's original claim, or
+something the Windows pre-init capture will reveal) rather than anything
+fixable by changing what/when we send from the Linux userspace side.
+
 **Also worth relaying**: a real, live Linux capture of classic-protocol
 GUI mode switching (`testtt.pcapng`, RainbowWave -> Pulse via
 `rog-control-center`) confirmed `write_effect_and_apply` genuinely never
