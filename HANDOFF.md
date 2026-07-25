@@ -2228,6 +2228,59 @@ find it. Reinforces that `0x04` (or a still-undiscovered protocol) really
 is the correct track for the lightbar, independent of tonight's real win
 on the keyboard-zone side.
 
+**Further repo-digging (2026-07-25, still later same session), per direct
+instruction to keep digging rather than blind brute-force.** Checked
+every other LED/lighting-adjacent subsystem in this codebase:
+
+- `rog-slash` (`rog-slash/src/usb.rs`): a real, different protocol on
+  report `0x5d` with never-before-tried subcommands (`0xd2/0xd3/0xd4/
+  0xd7/0xd8`, 32-byte packets) for the "Slash" scrolling LED strip
+  feature on certain 2024/2025 ROG lid designs (GA403/GA605/GU605/G614F).
+  Its `report_id()` maps our exact product ID (`0x19b6`) to report `0x5d`
+  for several of these models -- confirms ASUS reuses the same USB PID
+  across many distinct physical laptop generations, a useful general
+  caveat. But `SlashMode`'s variants (`Bounce`, `Flow`, `BitStream`,
+  `Transmission`, `Spectrum`, `GameOver`, `Buzzer`...) are clearly an
+  animated display-strip feature, not a chassis lightbar -- genuinely
+  different hardware. Confirmed via `journalctl` earlier tonight that
+  G615LR is already correctly excluded by board name
+  (`get_slash_type()`) -- a deliberate, correct exclusion, not an
+  oversight like the per-key `advanced_type` was. Not tested against
+  hardware; insufficient justification versus the per-key lead.
+
+- `rog-anime` (`rog-anime/src/usb.rs`): report ID `0x5e` (`DEV_PAGE`) is
+  a REAL, actively-used data report for the AniMe Matrix LED-matrix
+  display protocol (subcommands `0xc0/0xc2/0xc3/0xc4/0xc5`), not just an
+  identification handshake. Its own `pkts_for_init()` sends the exact
+  same `0x5e` + "ASUS Tech.Inc." handshake pattern found failing on our
+  device tonight -- confirms `0x5e` is ASUS's shared generic vendor-
+  handshake report number, reused across multiple different product
+  lines, not something unique or lightbar-specific. Explicit code
+  comment: "The currently known USB device for the AniMe Matrix is
+  `0x193b`... `0x19b6` is a different ASUS USB device (the N-KEY keyboard
+  interface) -- historical comment was incorrect." Different physical USB
+  product ID entirely -- not testable against G615LR, correctly excluded.
+
+- `ctrl_platform.rs`/`asus_armoury.rs`: zero HID/USB involvement at all --
+  entirely sysfs-based (`rog_platform::platform::RogPlatform`,
+  `FirmwareAttributes`, the `asus-nb-wmi`/ACPI kernel interface). Fan
+  curves, performance profiles, GPU MUX -- a completely separate
+  subsystem, no lead here.
+
+**New hypothesis directly inspired by AniMe Matrix's separate PID,
+checked and ruled out**: does G615LR's lightbar live on its OWN separate
+USB device/product ID, the same way AniMe Matrix (`193b`) is physically
+distinct from the N-Key keyboard device (`19b6`)? Checked `lsusb -d
+0b05:`: only ONE ASUS vendor device exists on this system at all -- the
+N-Key device, same one used all session. No separate lightbar device.
+Combined with the full byte-level report-descriptor parse of both
+interfaces done earlier tonight (every report ID on both interfaces
+already accounted for, no hidden third collection), this rules out "a
+device we haven't found yet" as an explanation -- whatever controls the
+lightbar, if anything on this exact wire, must go through a report ID
+already known about (most likely still `0x04`), not an undiscovered
+device elsewhere on the bus.
+
 **Real hazard recurrence, noted for future sessions**: the ~6-minute
 `g615lr-bruteforce-allgroups.rs` sweep got interrupted mid-run (Ctrl+C),
 which killed the built-in keyboard again -- `SIGINT` terminates the
