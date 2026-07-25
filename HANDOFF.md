@@ -1935,3 +1935,112 @@ capture catches full enumeration + whatever the driver sends immediately
 after, not just steady-state traffic. This can only be done from the
 Windows side (Linux's `hid-generic`/`hid_asus` has no knowledge of this
 vendor protocol to replicate). Asked in `QUESTIONS.md`.
+
+**Major methodology upgrade + a definitive negative result (2026-07-25,
+still later same session).** Got live Wireshark GUI capture working on
+Linux for the first time all session (`usbmon5`, run as the logged-in
+user -- unlike our earlier `sudo tshark` CLI attempts, which kept hitting
+AppArmor/dumpcap confinement, the GUI app itself already has the right
+capabilities/group setup and just works). This finally lets Linux-side
+`0x04` tests be verified at the wire level the same way Windows' captures
+always have been, instead of relying on visual observation alone.
+
+Fresh data also arrived from Windows this session (`25/123.xml`+
+`usb_data.txt`, `25/test123.xml`+`all_usb_data.txt` -- real Aura Creator
+captures, both a project XML export and the corresponding USB capture).
+Cross-referencing the XML against `usb_capture_session3/ground_truth/
+WDL_G615LR.csv`'s `lamp_id` column (index -> wire ID) gave a THIRD
+independent confirmation the `Lightbar2025Zone` wire-ID map is correct,
+and revealed real structure: each Aura Creator "layer" batches its own
+zone group into `0x04` packets (e.g. one layer = all 6 right-side
+lightbar zones in one packet, matching the observed `04 06 01 04 00 06
+00...` batches exactly). More importantly, it proved animation for this
+protocol is **entirely host-rendered** -- the firmware has no onboard
+animation engine for `0x04` at all. Real "Breathing" effects are just
+Armoury Crate continuously recomputing and streaming a fresh RGBA frame
+(alpha channel ramping smoothly, e.g. `06->18->35->58->80->a7->cb->e7->fb
+->ff->f5->e0->c2->9d`, a triangle wave) at ~30fps. Every prior `0x04` test
+this whole investigation sent byte-for-byte IDENTICAL repeated packets
+(constant alpha=0xFF) -- never a genuinely changing frame.
+
+**New hypothesis tested**: maybe this firmware only redraws on an actual
+value CHANGE, silently no-op'ing exact repeats. Built
+`rog-platform/examples/g615lr-alpha-ramp.rs`: primes, then streams a
+SINGLE zone (kbd3, 0x02) with the same real triangle-wave alpha pattern
+observed in Windows' capture, at matching ~30ms cadence, for 15s (484
+frames). Captured the ENTIRE run live with the newly-working Wireshark
+GUI (`usbmon5`) -- first time this session an `0x04` test has been
+independently wire-verified on Linux, not just visually judged.
+
+**Result: the capture proves every single one of the 484 writes left the
+host correctly** -- `04 01 01 02 00...ff 00 00 [ramping alpha]`, exact
+structure, exact zone, exact colour, alpha genuinely changing frame to
+frame exactly as intended, steady ~31ms spacing. Byte-for-byte
+indistinguishable in structure from a real animated Aura Creator frame.
+**Visually: still nothing distinguishable** -- chassis showed plain
+RainbowCycle (from the priming step) the whole time, no visible effect
+attributable to the alpha-ramping stream. This is the strongest negative
+result of the investigation: it definitively rules out "our packets are
+being silently dropped/coalesced/malformed before reaching the wire" as
+an explanation -- confirmed correct at the USB level, not just assumed
+correct from our own packet-builder code. Whatever's missing is
+confirmed to be firmware/device-side, not a transport or software bug on
+the Linux side. Strengthens the case for the still-pending Windows
+pre-init capture being the actual remaining path forward.
+
+**Also worth relaying**: a real, live Linux capture of classic-protocol
+GUI mode switching (`testtt.pcapng`, RainbowWave -> Pulse via
+`rog-control-center`) confirmed `write_effect_and_apply` genuinely never
+sends the `b3/b4/b5` "priming" triplet for classic mode changes -- that
+sequence is Armoury-Crate-specific behavior seen in the original Windows
+capture, not a universal wire-level requirement. It IS still present in
+Windows' real `0x04` capture though (checked `usb_data.txt` again:
+priming triplet fires twice before the first `0x04` write), so it's
+correctly included in `g615lr-alpha-ramp.rs` and other `0x04` tests --
+just worth being precise that its role is specific to `0x04` sessions,
+not a general "wake the device" requirement.
+
+**Follow-up hypothesis (2026-07-25, later same session), refuted**: live
+interactive user testing of the CLASSIC `0x5d` protocol's `AuraZone`
+(`Key1-4`/`Logo`/`BarLeft`/`BarRight` -- a completely different, older,
+7-value zone system from `Lightbar2025Zone`'s 16 wire IDs) surfaced a real
+finding: once ANY animated mode is running globally (zone=None), NEW
+zone-scoped `0x5d` writes on top of it get ABSORBED into that
+already-running animation loop rather than creating independent state --
+live-confirmed: with `breathe --zone 1` (blue) already animating, sending
+`static --zone 2 -c ffff00` (a STATIC command) made zone 2 start
+BREATHING green, synced with zone 1. (Caveat found along the way: an
+earlier "entire keyboard breathing" result was a false alarm caused by a
+stray `rog-control-center` GUI process left running in the background
+from earlier testing, independently issuing its own D-Bus calls and
+corrupting `AuraConfig.multizone_on` -- always `pkill -f
+/bin/rog-control-center` before isolated CLI zone testing.)
+
+Given `0x04` streaming against an active RainbowCycle produces a flicker
+(writes land, get overwritten next tick) but RainbowCycle is purely
+procedural with no colour parameter to read, the natural next hypothesis
+was: does an active **Breathe** loop (which demonstrably re-reads colour
+data every tick, per the zone-2 finding above) actually pick up and
+persistently render `0x04` zone writes on top of it, unlike RainbowCycle?
+Tested directly (`rog-platform/examples/g615lr-breathe-then-04.rs`): dark
+reset -> global Breathe (red) via real `b3,b5,b4` -> confirmed animating
+-> streamed `0x04` for a single zone (kbd3, green) for 15s on top.
+**Result: completely inert, not even a flicker.** The classic protocol's
+"absorb new writes into the active loop" behaviour does NOT cross over to
+`0x04` -- the two protocols are using genuinely separate internal
+state/rendering in firmware, not one shared engine either can feed. Rules
+this specific idea out; does not change the core conclusion above (still
+need the Windows pre-init capture).
+
+**Real, separate hazard hit and fixed while building this test**: the
+test binary panicked once (an off-by-one hex string, 52 bytes instead of
+51) AFTER `detach_kernel_driver(0)` but before the cleanup code that
+reattaches it -- interface 0 is the SAME USB interface the physical
+keyboard's boot-input collection lives on, so this silently killed the
+built-in keyboard until manually fixed via `echo -n "5-4:1.0" | sudo tee
+/sys/bus/usb/drivers/usbhid/bind` (restarting asusd does NOT fix this,
+kernel driver binding is independent of any userspace daemon). Fixed the
+test itself with a `Drop`-based `RestoreGuard` that reattaches both
+interfaces' kernel drivers unconditionally, even during a panic unwind --
+worth retrofitting onto every other `g615lr-*.rs` raw-`rusb` example that
+detaches kernel drivers, since every one of them has the same latent risk.
