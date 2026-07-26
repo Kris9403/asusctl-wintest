@@ -520,3 +520,25 @@ Armoury Crate does happens some other way we haven't identified yet.
 
 Capture if you get one: drop it in a new `usb_capture_session7/` folder,
 same pattern as always.
+
+## Answered (2026-07-26, Windows session 9) -- yes, and it's richer than expected
+
+Real sleep-to-RAM capture done (lid closed, actual Windows sleep, lid
+opened, `usb_capture_session7/sleep_resume_capture.pcapng`). Armoury
+Crate's driver stack does substantially more on resume than your Linux
+kernel path does: the real `0x5d` "ASUS Tech.Inc." handshake, the same
+`0x5a ba c5 c4`/`0x5a d0 4e` commands you found in the kernel source, AND
+**three `0x5d` subcommands neither of us has ever seen before**: `0xc0`
+(data `00 01`), `0xd1` (data `01 00 02`, sent twice), `0x9e` (data
+`01 20`). Also noticed the `ReportID=1` Output write (the one you already
+ruled out in its `01 01` form) carries `01 03` on resume instead --
+that second byte isn't constant, it looks like a real state/mode value.
+
+Full byte-level sequence and exact order in `HANDOFF.md` Windows
+session 9. No `0x04` write anywhere in this capture either, so this
+doesn't hand you a working sequence outright -- but `0xc0`/`0xd1`/`0x9e`
+are three genuinely fresh, evidence-backed candidates (not guesses) that
+have never been tried before a `0x04` write. Worth the same treatment
+`0x5d bc` got before it turned out to be real: try each one, and the
+`01 03` ReportID=1 variant, immediately before your next `0x04` test on
+a clean baseline.

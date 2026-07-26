@@ -2644,3 +2644,75 @@ enable, which did NOT clear the stuck state) is saved as
 `usb_capture_session6/pcap3_full_composite_disable_enable.pcapng` for
 whoever wants to check whether it shows anything unusual compared to
 the session 7 single-collection capture.
+
+## Windows session 9 (2026-07-26) -- real sleep/resume capture, answering Linux's exact question with new protocol surface
+
+User did this one entirely themselves: started a USBPcap capture, closed
+the lid, let Windows actually go to sleep, then opened it back up and
+saved the result (`SLEEP.pcapng`, moved into this repo as
+`usb_capture_session7/sleep_resume_capture.pcapng`). This is exactly what
+Linux asked for in `QUESTIONS.md` ("does Windows do anything lightbar-
+specific on a genuine sleep-to-RAM/resume cycle") -- a real suspend, not a
+Device Manager disable/enable.
+
+**Timeline**: continuous `0x0305` `SET_REPORT Feature ReportID=5`
+RainbowCycle stream from t=0 to t=9.88s (normal pre-sleep baseline), then
+a real ~25.7s gap (t=9.88s to t=35.56s) where the capture process itself
+was suspended along with the rest of the system, then traffic resumes.
+
+**On resume, real, substantial handshake traffic -- much richer than
+anything captured before this session**, decoded in exact order:
+```
+09 01 02 00 00 02 00 01 03            (ReportID=1 Output, data=01 03 -- NOT 01 01!)
+09 5a 03 00 00 40 00 5a ba c5 c4 00   (brightness restore, brightness=0)
+09 5a 03 00 00 40 00 5a ba c5 c4 03   (brightness restore, brightness=3)
+09 5d 03 00 00 40 00 5d "ASUS Tech.Inc."   (real 0x5d handshake)
+09 5d 03 00 00 40 00 5d 05 20 31 00 20 00...   (status)
+09 5d 03 00 00 40 00 5d c0 00 01 00...   (NEW subcommand 0xc0, never seen before)
+09 5d 03 00 00 40 00 5d d1 01 00 02 00...   (NEW subcommand 0xd1, sent TWICE)
+09 5a 03 00 00 40 00 5a d0 4e 01...   (the 0x5a query, matches earlier captures)
+09 5d 03 00 00 40 00 5d c0 00 01 00...   (0xc0 again)
+09 5d 03 00 00 40 00 5d 9e 01 20 00...   (NEW subcommand 0x9e, never seen before)
+09 5d 02 00 00 40 00 5d b3 00 02 00 00 00 eb 00...   (the familiar priming triplet)
+09 5d 02 00 00 40 00 5d b4 00...
+09 5d 02 00 00 40 00 5d b5 00...
+```
+This entire block (from the `0x5d` handshake through the priming triplet)
+repeats a second time about 1.5s later in the same capture, byte-for-byte
+identical in structure. Confirmed via `usb.data_len` distinct-value check
+across the whole capture: only sizes 8/10/18/72 appear -- **no `0x04`
+(59-byte) lightbar write anywhere**, and no `0x00`/9-byte report-0 write
+this time either (that one, from Windows session 8, may be specific to
+whatever triggered it there, not a universal resume step).
+
+**Two genuinely new things here, neither ever seen in this entire
+investigation across either OS**:
+1. **Three undocumented `0x5d` subcommands**: `0xc0` (data `00 01`),
+   `0xd1` (data `01 00 02`, sent twice), `0x9e` (data `01 20`). All real,
+   all sent by Armoury Crate's own driver stack on genuine resume, none
+   previously captured in any Device Manager disable/enable, kernel
+   reprobe, or service restart this whole investigation.
+2. **The `ReportID=1` Output write's second data byte is NOT constant.**
+   Every prior sighting (Windows session 3's original priming script,
+   `g615lr-alpha-ramp.rs`, Windows session 8's diff of the `25/` Aura
+   Creator captures) showed `01 01`. Here, on resume specifically, it's
+   `01 03`. This strongly suggests that second byte is a real state/mode
+   value (e.g. "resuming" vs some other context), not a fixed wake
+   signal -- worth treating as a variable, not a constant, in any future
+   test.
+
+**Not yet tested against hardware, real candidate for whoever picks this
+up**: none of `0x5d c0`/`0x5d d1`/`0x5d 9e` have ever been sent
+deliberately in isolation before a `0x04` write. Given the `0x5d bc`
+custom-mode family turned out to be a real, working, previously-
+undiscovered protocol this same investigation (Windows/Linux session 6's
+BREAKTHROUGH), these three are genuine, evidence-backed candidates worth
+the same treatment -- try each one (and the `01 03` variant of the
+ReportID=1 write) immediately before a `0x04` zone write, on a clean
+baseline. Unlike the report-6 guess or the earlier report-1 timing lead
+(both already tried and failed), these three bytes have literally never
+been sent by anyone testing this protocol before tonight.
+
+Capture: `usb_capture_session7/sleep_resume_capture.pcapng`. Answers
+Linux's `QUESTIONS.md` ask directly -- see that file for the relayed
+answer.
