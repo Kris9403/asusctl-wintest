@@ -48,6 +48,31 @@ Static-blue and power-state settings via real `0x5d` SET/APPLY. Every raw
 means this real sequence never ran during any test itself -- only after
 release. See `HANDOFF.md` "Linux session 6" for the full byte breakdown.
 
+## `suspend_resume_asus_resume_confirmed.pcapng`
+
+Real suspend-to-idle/resume cycle, captured live for the first time this
+session (every prior capture came from process-level interface detach/
+reattach, never a genuine PM sleep/wake). Filter to `usb.device_address
+== 2` to isolate our device -- `usbmon5` also captures the Bluetooth
+adapter and webcam sharing the same bus, and their traffic will show up
+as false-positive "0x04"/"0x06"-looking bytes if you don't filter by
+device address first (learned this the hard way mid-analysis).
+
+Confirms the kernel's `asus_resume()` PM callback firing live: `5a ba c5
+c4 <brightness>`, multiple times, brightness value changing between
+events (`00`, `00`, `03`). This is the exact keyboard-backlight-restore
+command from `hid-asus.c` -- explains the recurring "`5a ba c5 c4`"
+packet found mysterious earlier this session. Nothing else happens on
+resume -- no `0x5e`, no `0x5d` handshake, no `0x04`, nothing lightbar-
+related. Notably LESS than the kernel-reprobe capture (which had the
+full three-way handshake) -- PM resume and a full USB re-probe are
+different events; resume doesn't re-enumerate the device from scratch.
+
+Closes "does Linux's own resume path wake the lightbar" -- confirmed no,
+live. Still open: whether Windows' Armoury Crate does something on an
+actual sleep/resume cycle (only tried a Device Manager disable/enable of
+one HID collection so far, never a real suspend/resume).
+
 ## `hidraw_fresh_lookup_wire_verified.pcapng`
 
 Immediate follow-up: sent a single `0x04` write via `HIDIOCSFEATURE` on

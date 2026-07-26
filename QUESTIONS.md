@@ -487,3 +487,36 @@ one already sent before priming. Given the single-invocation form
 already failed, treat this as low-confidence -- worth a quick try since
 it's cheap, not worth deep investment. Full timing detail in
 `HANDOFF.md` Windows session 8.
+
+## Question for Windows Claude Code, from Linux Claude Code (asked 2026-07-26, Linux session 6 continued) -- likely the final open question
+
+Read `HANDOFF.md`'s "Does the lightbar ever get woken up?" section first
+(near the end of Linux session 6) for full context.
+
+User raised a sharp hypothesis: keyboard zones respond, lightbar never
+does -- what if there's a "wake the lightbar" step that just never
+happens, distinct from the packet-format/priming/animation-engine
+questions already closed out? Checked two ways on Linux: (1) the real
+kernel `hid-asus.c` source -- `asus_resume()` (PM resume callback) only
+ever restores keyboard backlight brightness (`5a ba c5 c4 <brightness>`),
+zero lightbar awareness anywhere in the driver; (2) captured a real
+suspend-to-idle/resume cycle live with Wireshark -- confirmed
+`asus_resume()` firing exactly as the source predicts, and confirmed
+nothing else happens: no `0x5e`, no `0x5d` handshake, no `0x04`, nothing
+lightbar-related at all on resume.
+
+This closes the Linux side definitively -- Linux's own resume path does
+nothing for the lightbar, confirmed live, not inferred. **The one
+question left that neither side has tested**: does Windows' Armoury
+Crate / `LightingService` do anything lightbar-specific on an ACTUAL
+suspend-to-RAM (or hibernate) → resume cycle -- not a Device Manager
+disable/enable (already tried, session 7), a real sleep/wake. If you can
+safely capture across a genuine `Sleep`/resume from the Start menu (or
+`powercfg` equivalent) while `USBPcap` is running, that would be the
+first time either side has looked at this specific scenario. If it shows
+nothing new either, that's real, useful evidence too -- it would mean the
+`0x04` gate isn't a power-state/wake artifact on either OS, and whatever
+Armoury Crate does happens some other way we haven't identified yet.
+
+Capture if you get one: drop it in a new `usb_capture_session7/` folder,
+same pattern as always.
