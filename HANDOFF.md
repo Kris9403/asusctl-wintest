@@ -3002,3 +3002,56 @@ to be rerun as genuine multi-zone batches instead of single-zone writes.
 
 This is the single most important thing for whoever picks this up next
 to do first, on whichever OS is more convenient.
+
+## NOT resolved -- isolation test contradicted itself on rerun, real open question
+
+First isolation run (`usb_capture_session7/
+test_count1_backright_isolated.ps1`, `count=1`, zone `back_right` alone,
+identical priming/colour to the working `count=5` test, 15s/341 packets,
+all `HidD_SetFeature` calls succeeded -- clean transport): **zero visible
+effect**, live-confirmed. Looked like a clean, definitive answer
+(`count=1` never works, `count>1` is the real prerequisite) and got
+written up as "RESOLVED" in this file for a few minutes.
+
+**Then the user asked for a rerun before accepting that conclusion --
+good call.** Same script, same packet, run again immediately after (18s,
+`usb_capture_session7/pcap3_count1_backright_isolated_run2.pcapng`):
+**lit up, same as the working multi-zone test.** Flatly contradicts the
+first run. Nothing about the script or packet changed between runs.
+
+**Real, live, unresolved question**: does `count=1` genuinely never work
+(and the second run's success was caused by some carried-over device/EC
+state from the earlier successful `count=5` write and/or the first
+`count=1` run's own 341 packets -- i.e. zone `0x04` got "activated" once
+by something in this boot session and stayed that way), or does
+`count=1` actually work sometimes and the FIRST run's negative result
+was the anomaly (e.g. needed more repetitions/time to register than 15s
+gave it)? These two explanations make opposite predictions and can only
+be told apart by a genuinely clean test.
+
+**The test that would actually resolve this, not yet run**: full
+reboot (clean EC/session state, no prior exposure to zone `0x04` at all
+this boot), then send a `count=1` write to `back_right` FIRST, before
+anything else touches that zone -- no prior `count=5` write, no prior
+`count=1` attempt in the same session. If it lights on the very first
+try: `count>1` was never the real variable, something else explains
+every previous negative result. If it stays dark: strengthens the
+`count>1`-requirement theory, though still wouldn't fully rule out a
+"needs N repetitions to register" explanation without more controlled
+runs.
+
+**What's still solid regardless of this open question**: the `count=5`
+multi-zone packet structure decoded earlier this session is real and
+wire-verified correct (byte-for-byte identical to Aura's own working
+capture), and at least one real, live-confirmed lighting of the lightbar
+DID happen from our own code tonight -- that part isn't in question, only
+WHY it happened (count, carried-over state, or something else) is still
+open. Whoever picks this up next: run the clean-reboot test above
+before trusting either the "count>1 required" or "count doesn't matter"
+framing -- neither is confirmed yet.
+
+Captures: `usb_capture_session7/pcap3_count1_backright_isolated.pcapng`
+(run 1, negative), `usb_capture_session7/
+pcap3_count1_backright_isolated_run2.pcapng` (run 2, positive -- same
+script). Working capture from the breakthrough:
+`usb_capture_session7/pcap3_count5_multizone_test.pcapng`.

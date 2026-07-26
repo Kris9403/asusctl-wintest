@@ -105,20 +105,26 @@ entirely.
 
 ## Current state (check `git log` for anything newer than this)
 
-- 🎯🎯 **BREAKTHROUGH (2026-07-26, Windows session 9): first-ever
-  successful `0x04` reproduction from our own code, not just Aura's.**
-  Sent a real `count=5` multi-zone packet (5 zones in one write,
-  keyboard zones at alpha~0, lightbar zone `back_right` at full alpha
-  with a real colour) via raw `HidD_SetFeature` on Windows — the
-  lightbar zone lit up, live-confirmed twice, wire-verified byte-for-
-  byte identical to a real Aura capture. Every prior `0x04` test on
-  either OS used `count=1` (one zone per packet) — this is the first
-  `count>1` test ever run, and it worked. **Not yet confirmed which
-  variable mattered** — it's also the first time zone `0x04` itself was
-  tried. The critical next test (not yet done as of this writing): a
-  `count=1` packet targeting only `back_right` alone. See `HANDOFF.md`
-  "BREAKTHROUGH" and `QUESTIONS.md` for full detail — read this before
-  anything else below, it may make some of it obsolete.
+- 🎯 **Real progress, NOT fully resolved (2026-07-26, Windows session
+  9): first-ever successful `0x04` reproduction from our own code, but
+  the follow-up isolation test contradicted itself.** Sent a real
+  `count=5` multi-zone packet (5 zones in one write, keyboard zones at
+  alpha~0, lightbar zone `back_right` at full alpha with a real colour)
+  via raw `HidD_SetFeature` on Windows — the lightbar zone lit up,
+  live-confirmed, wire-verified byte-for-byte identical to a real Aura
+  capture. Every prior `0x04` test on either OS had used `count=1`
+  (one zone per packet); this was the first `count>1` test ever run.
+  **But** the obvious follow-up (`count=1` targeting only `back_right`,
+  same everything else) gave OPPOSITE results on two consecutive runs —
+  first run: nothing; second run, same script: lit up. So `count>1`
+  being the real prerequisite is NOT confirmed — could instead be
+  carried-over device/EC state from earlier successful writes this
+  boot session. **The test that would actually resolve this (not yet
+  done)**: full reboot, then `count=1` on `back_right` as the very
+  first thing sent to that zone. Do not trust either "count matters" or
+  "count doesn't matter" until that clean test runs. See `HANDOFF.md`
+  "NOT resolved" section (search for that exact heading) and
+  `QUESTIONS.md` for full detail, all scripts, and both capture files.
 - ✅ Basic whole-chassis colour/effect control via the classic `0x5d`
   protocol: **shipped and working**, 5 of 12 built-in modes confirmed live
   (`Static`, `Breathe`, `RainbowCycle`, `RainbowWave`, `Pulse`), the other

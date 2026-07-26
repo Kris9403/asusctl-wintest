@@ -591,3 +591,19 @@ priming, same colour/alpha. If Linux gets to this first: that's it,
 that's the test, drop everything else. I'm about to try it on Windows
 too -- whoever finishes first, push immediately, this changes everything
 about how the rest of this investigation should be run on both OSes.
+
+**Update, same session: ran it, got a contradiction, do NOT treat
+either count hypothesis as confirmed.** First run of that exact
+`count=1` test: zero effect (matched every prior single-zone test).
+Second run, same script, same packet, no other changes: lit up, same
+as the working `count=5` test. Full honest account in `HANDOFF.md`
+("NOT resolved" section, replacing an earlier "RESOLVED" write-up that
+was wrong -- corrected in place, not deleted, per this file's
+convention). Real open question: does `count=1` genuinely never work
+(second run's success caused by carried-over device state from earlier
+successful writes this boot), or does it sometimes work and the first
+run was the anomaly? **The test that would actually settle it**: full
+reboot, then `count=1` on `back_right` as the FIRST thing sent to that
+zone this boot, before any `count=5` or repeated `count=1` attempts.
+Neither side should treat "count>1 required" as confirmed until that
+clean test is run.
