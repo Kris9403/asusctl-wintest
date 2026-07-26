@@ -542,3 +542,27 @@ have never been tried before a `0x04` write. Worth the same treatment
 `0x5d bc` got before it turned out to be real: try each one, and the
 `01 03` ReportID=1 variant, immediately before your next `0x04` test on
 a clean baseline.
+
+## One more real untried variable (2026-07-26, Windows session 9, multi-zone decode)
+
+Empirically decoded (script, not guessing -- see `HANDOFF.md`) the real
+`count>1` `0x04` packet layout using hundreds of real Aura Creator
+writes plus a fresh real capture of "lightbar-only, keyboard off"
+lighting up live. Confirmed structure: zone-ID list at `data[3:19]`
+(fixed 16-byte region, up to 8 zones), RGBA blocks (R,G,B,Alpha) at
+`data[19:19+4N]`, same order as the zone list, alpha acting as a real
+per-zone on/off gate (near-0 = invisible, 0xff = fully rendered) --
+generalizes the already-confirmed `count=1` layout, `count=1` was just
+`N=1` of this same scheme.
+
+Audited every existing `count=1` reproduction script against this --
+clean, no alpha-byte bug found anywhere, all already used the correct
+offsets and full alpha.
+
+**The actual new thing to try**: every single `0x04` test either side
+has ever run has been `count=1` (one zone per packet). Nobody has tried
+a real `count>1` write. Given the one confirmed-working real example we
+now have used `count=5`, replicating that exact packet byte-for-byte
+(zone list `00 00 01 00 02 00 03 00 04 00`, keyboard zones at
+alpha~0/RGB=0, lightbar zone `back_right` at `61 ff 00 ff`) is a
+genuinely untried variable, not a rehash of anything already tested.

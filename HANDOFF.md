@@ -2845,3 +2845,97 @@ side has captured the `0x04`-then-`0x0305` handoff moment itself in a
 real working session with a live human-confirmed visual result attached.
 
 Capture: `usb_capture_session7/static_armory_to_aura_lightbar_only.pcapng`.
+
+## Windows session 9, continued a third time -- multi-zone `0x04` byte layout, empirically decoded and confirmed
+
+Per direct instruction, replaced hand-transcribing hex (which had already
+failed twice this session) with an actual script. Method: real Aura
+Creator captures stream each active "layer" repeatedly while animating
+it (already established -- alpha/colour ramps smoothly frame to frame),
+so grouping consecutive real `0x04` writes by their exact zone-ID list
+and measuring per-byte-position smoothness (small frame-to-frame deltas
+= real animated channel; zero variance = structural/constant; large
+random deltas = misread byte) turns "guess the layout" into "measure
+it directly from hundreds of real examples."
+
+Pulled every real `0x04` write from `25/test123.pcapng` (277 writes),
+`25/123.pcapng` (188 writes), and this session's
+`static_armory_to_aura_lightbar_only.pcapng` (1 write) -- 466 total after
+filtering to writes with a parseable zone list. Zone counts seen:
+2, 4, 5, 6, 8 (never above 8). Found 11 batches of >=8 consecutive
+same-zone-list writes; ran the smoothness analysis on the 3 largest.
+
+**Confirmed structure** (byte-accurate, `data[]` relative to the report
+ID byte, i.e. `data[0] = 0x04`):
+```
+data[0]        report ID (0x04)
+data[1]        zone count N (observed range 1-8)
+data[2]        flag, always 0x01 in every sample
+data[3:19]     zone-ID list, N x u16 LE, zero-padded -- a FIXED 16-byte
+               region (room for exactly 8 zones) regardless of actual N
+data[19:19+4N] N x RGBA (R, G, B, Alpha -- 4 bytes each), SAME ORDER as
+               the zone-ID list, ALWAYS starting at offset 19 no matter
+               how small N is (confirmed identical start offset in
+               count=4 AND count=8 batches -- the zone-ID region isn't
+               resized, just under-filled and zero-padded)
+data[19+4N:]   unused, zero
+```
+This is a real generalization of the already-confirmed `count=1` layout
+(zone ID at `data[3:5]`, RGBA at `data[19:23]`) -- turns out `count=1` was
+just the `N=1` case of this same fixed-offset scheme all along, not a
+special case.
+
+**Applied to `static_armory_to_aura_lightbar_only.pcapng`'s one real
+`0x04` write** (the "just lightbar, no keyboard" capture): zone list
+`kbd1, kbd2, kbd3, kbd4, back_right`. Decoded RGBA blocks:
+- kbd1: `00 00 00 01` -- R,G,B=0, alpha=1 (~0, effectively invisible)
+- kbd2: `00 00 00 01` -- same
+- kbd3: `00 00 00 01` -- same
+- kbd4: `00 00 00 01` -- same
+- back_right (lightbar): `61 ff 00 ff` -- R=0x61,G=0xff,B=0x00 (a real
+  bright yellow-green), alpha=**0xff (full)**
+
+This lines up exactly with what the user watched happen live: all four
+keyboard zones effectively off (near-zero alpha), the lightbar zone lit
+with a real colour at full alpha. **Alpha is a real per-zone visibility
+gate in this protocol, not just a brightness dimmer** -- confirms multiple
+zones can be legitimately "addressed but invisible" in the same packet
+that lights another zone, which is exactly the "12 lightbar zones lit,
+keyboard untouched" scenario the user described.
+
+**Real caveat, stated plainly**: this decodes the packet FORMAT
+correctly and confirms it's internally consistent across 4 independent
+real sources -- it does NOT explain why sending byte-identical packets
+from Linux/our own Windows raw tests produces zero visible effect. The
+core mystery is unchanged.
+
+**Audit done immediately, same session**: checked whether any existing
+`count=1` reproduction script had a latent alpha-byte bug (sending
+alpha=0 by mistake for a zone it means to light would produce exactly
+the "zero visible effect" symptom this whole investigation keeps
+hitting, for a completely mundane reason). Checked
+`g615lr-alpha-ramp.rs`, `g615lr-kbd1-static-no-priming.rs`, and
+`g615lr-corner-no-priming.rs` directly -- **clean, no bug found**. All
+three place R/G/B/A at the confirmed-correct offsets 19-22;
+`kbd1-static-no-priming.rs` uses a constant `alpha=0xff`, the other two
+ramp alpha but both peak at `0xff`. So this newly-confirmed layout
+doesn't reveal a bug in prior reproduction attempts, it just confirms
+packet construction was already right in every test that mattered --
+consistent with (not contradicting) the wire-verification already done
+in Linux session 6.
+
+What this DOES give, genuinely new: a corrected, fully empirically-
+verified reference for `count>1` packets (previously only `count=1` was
+confirmed), useful if either side wants to construct a real multi-zone
+reproduction test (nobody has tried a `count>1` packet from Linux or a
+raw Windows test yet -- every test all investigation has been
+`count=1`, one zone at a time). Given the one real working example we
+have (`static_armory_to_aura_lightbar_only.pcapng`) used `count=5`, a
+genuine multi-zone test -- replicating that exact packet byte-for-byte,
+rather than another single-zone attempt -- is a real, untried variable
+worth adding to the list.
+
+Analysis script: `C:\Users\Krushna\re\decode_multizone.py` (local only,
+not committed -- pure analysis tool, references temp hex dumps outside
+the repo; rewrite against `25/`'s files directly if this needs to be
+reproduced in a future session).
