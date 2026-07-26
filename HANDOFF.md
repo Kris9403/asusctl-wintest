@@ -2783,3 +2783,65 @@ regardless of which UI nominally has "priority," and the underlying
 mystery (`0x04`'s missing prerequisite) is unaffected by any of this.
 
 Capture: `usb_capture_session7/dynamic_lighting_capture.pcapng`.
+
+## Windows session 9, continued again -- a real, wire-verified 0x04 write, first one in any capture tonight
+
+User's third self-directed capture: static blue in Armoury Crate, then
+switched device control to "Aura" (the standalone lighting app/service,
+not Armoury Crate), which was configured to drive lightbar zones only
+(12 regions), no keyboard, as a colour cycle. Saved as
+`usb_capture_session7/static_armory_to_aura_lightbar_only.pcapng`
+(344 packets).
+
+**Real finding**: exactly ONE `SET_REPORT Feature ReportID=4` (`0x04`)
+write in the entire capture, at frame 85 (t=9.593s), landing right in
+the middle of a burst of `0x5d` handshake traffic (three 72-byte writes
+just before it) and immediately followed by continuous `0x0305`
+(`ReportID=5`) streaming for the rest of the capture (t=9.66s onward,
+every ~60ms, matching the "colour cycle" the user described).
+
+Full 51-byte payload, byte-accurate (re-verified twice after two manual
+transcription slips -- see below):
+```
+04 05 01 00 00 01 00 02 00 03 00 04 00  00 00 00 00 00 00 00 00 00
+   ^id ^cnt=5  ^^^^^ zone ID list (5 x u16 LE) ^^^^^^  ^^ 9-byte pad ^^
+01 00 00 00  01 00 00 00  01 00 00 00  01 61 ff 00  ff 00 00 00 00 00 00 00 00 00
+^^^^ 4-byte block, zone0 (kbd1) ^^^^  ^^^^ zone1 (kbd2) ^^^^  ^^^^ zone2 (kbd3) ^^^^  ^^^^ zone3 (kbd4) ^^^^  ^^^^ zone4 (back_right, lightbar) ^^^^
+```
+Zone ID list confirms the 5 zones addressed: `kbd1, kbd2, kbd3, kbd4,
+back_right` (wire IDs `0x00,0x01,0x02,0x03,0x04` -- `back_right` is a
+real lightbar zone per the corrected zone map). Then a 20-byte block
+(5 x 4 bytes, same zone order) with the colour value `61 ff 00`
+appearing inside the 4th block.
+
+**Honest, explicit uncertainty -- do not treat this as a confirmed
+decode**: every existing reference table in this repo
+(`multizone_12x_confirmed.pcapng`'s byte table, the `matches_human_
+confirmed_capture` unit test) is for `count=1` (one zone per packet)
+writes, where the RGBA fields sit at a fixed offset relative to packet
+start. This is a `count=5` packet, and the per-zone field order within
+each 4-byte block (is it `[alpha,R,G,B]`? `[R,G,B,alpha]`? something
+else?) does NOT resolve cleanly against either interpretation tried by
+hand this session -- neither made "keyboard zones off, lightbar zone lit
+with colour cycling" fall out consistently. **Do not guess further by
+eye** -- this needs either a script that walks the 20-byte block
+systematically against several more real multi-zone examples (the
+`25/test123.pcapng`/`25/123.pcapng` captures analyzed earlier this
+session have 309 and 241 real `0x04` writes respectively, almost
+certainly including more `count>1` examples worth cross-referencing),
+or asking Linux/a fresh session to write a small script rather than
+hand-transcribing hex again -- manual transcription from raw hex dumps
+failed twice in a row this session (dropped 2 bytes both times) before
+being caught by cross-checking against the `wLength` field.
+
+**What's solid regardless of the byte-order ambiguity**: this confirms,
+with a real wire capture, that a genuine "lightbar-only, colour-cycling,
+keyboard off" working state on this hardware is achieved via ONE `0x04`
+write (establishing which zones are addressable/active) followed by
+continuous `0x0305` streaming (the already-fully-characterized
+host-rendered animation mechanism) -- not a new protocol, not a
+different mechanism than already understood, just the first time either
+side has captured the `0x04`-then-`0x0305` handoff moment itself in a
+real working session with a live human-confirmed visual result attached.
+
+Capture: `usb_capture_session7/static_armory_to_aura_lightbar_only.pcapng`.
