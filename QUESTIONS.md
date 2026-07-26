@@ -465,3 +465,25 @@ the closer match to what actually produced your three-way handshake.
 
 Capture: `usb_capture_session6/pcap3_real_disable_enable.pcapng`.
 Full byte-level detail in `HANDOFF.md` Windows session 7.
+
+## Low-confidence lead for Linux (2026-07-25, Windows session 8, corrected)
+
+Diffed the user's own `25/test123.pcapng` and `25/123.pcapng` -- real,
+working Aura Creator sessions, never actually diffed byte-for-byte
+before now. First pass wrongly flagged a `SET_REPORT(Output, ReportID=1,
+wIndex=0, data=[0x01,0x01])` write as untested -- it isn't: your own
+`g615lr-alpha-ramp.rs` line 84 already sends it (labeled the same way
+Windows' session-3 script labeled it, "wake"), before the `0x5d` priming
+triplet, and it already failed. Correcting that here before you spend a
+cycle on it -- full correction in `HANDOFF.md` Windows session 8.
+
+**What's still actually open**: the real captures send that same
+`ReportID=1` write a SECOND time, right when `0x04` traffic actually
+starts (not just once before priming, which is all any existing script
+does). If you want to try it: add one more `SET_REPORT(Output,
+ReportID=1, wIndex=0, data=[0x01,0x01])` call immediately after priming
+finishes and immediately before your first `0x04` write, on top of the
+one already sent before priming. Given the single-invocation form
+already failed, treat this as low-confidence -- worth a quick try since
+it's cheap, not worth deep investment. Full timing detail in
+`HANDOFF.md` Windows session 8.

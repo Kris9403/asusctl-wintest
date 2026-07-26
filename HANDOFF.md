@@ -2471,3 +2471,123 @@ Capture: `usb_capture_session6/pcap3_real_disable_enable.pcapng`
 capture was a real negative result too but wasn't retained as a raw file
 -- the finding (byte-for-byte identical `0x0305` stream, no handshake) is
 fully described above instead.
+
+## Windows session 8 (2026-07-25) -- a genuinely new, untested candidate found by diffing the `25/` real captures
+
+User pushed back on treating any "it's impossible" read of the accumulated
+negative results as settled, and specifically asked to diff the user's own
+`25/test123.pcapng` and `25/123.pcapng` -- real, working Aura Creator
+sessions, captured live, that nobody had actually diffed byte-for-byte
+against our failed reproduction attempts before now (they'd only been
+used previously for the zone-ID triple-confirmation in Linux session 6).
+
+**Method**: tallied every `SET_REPORT`/class-request (`bmRequestType ==
+0x21`) in both captures by total URB length, to find anything that isn't
+one of the four already-fully-characterized shapes (`8` = zero-data
+request like `SET_IDLE`, `72` = the `0x5d` handshake's 64-byte payload,
+`18` = the `0x0305` stream's 10-byte payload, `59` = the `0x04` zone
+write's 51-byte payload). Both files have a small number of leftover
+frames that don't fit any of those buckets.
+
+**Found**: a `SET_REPORT` to **Report ID 1, Report Type = Output (not
+Feature -- every prior test all investigation used Feature exclusively)**,
+`wIndex = 0`, `wLength = 2`, data `01 01`. Full bytes: `09 01 02 00 00 02
+00 01 01`. Confirmed in BOTH real captures, at the same structural
+position each time:
+- `test123.pcapng`: fires once very early (frame 31, t=2.30s, right after
+  the initial descriptor reads, before the priming triplet even starts),
+  then fires again at frame 107, t=20.566482s -- **5 microseconds after**
+  frame 106's first real `0x04` zone write (t=20.566477s). A third
+  occurrence at frame 537, t=25.52s, fires paired with a second, distinct
+  report -- see below -- in the middle of what looks like a full `0x5d`
+  handshake replay mid-session (surrounded by more 72-byte `0x5d`
+  SET/GET pairs, unrelated to the very first one at session start).
+- `123.pcapng`: fires at frame 56, t=15.931347s, with the first real
+  `0x04` write following immediately after at frame 71, t=15.984701s
+  (~0.05s later).
+
+**Also found, only in `test123.pcapng`, paired with the third report-1
+occurrence**: `SET_REPORT` to **Report ID 0, Report Type = Output**,
+`wIndex = 0`, `wLength = 1`, data `01`. Full bytes: `09 00 02 00 00 01 00
+01`. Frame 536, t=25.521717s, immediately followed by frame 537's report-1
+write one millisecond later (t=25.521748s) -- a paired write, both firing
+together during that mid-session `0x5d` replay.
+
+**Correction, same session, before this got written up wrong**: first
+draft of this section claimed the `ReportID=1` Output write was
+completely untested. False -- checked the actual test code before
+finalizing and found `rog-platform/examples/g615lr-alpha-ramp.rs` line
+84 already sends exactly this (`send!("0x0201 (01 01) iface0", 0x09,
+0x0201u16, 0u16, &[0x01, 0x01]);`), and Windows'
+`g615lr_priming_then_static_hold.ps1` (session 3) has sent it since
+session 3 too, labeled "wake" in a comment. Both already tried it, as
+part of priming, and both still got zero visible effect. Correcting the
+record here rather than silently editing it away, per this file's
+append-only convention.
+
+**What's actually still untested, after that correction**: every existing
+script (`g615lr-alpha-ramp.rs` included) sends the `ReportID=1` Output
+write exactly ONCE, before the `0x5d` priming triplet, then never touches
+it again for the whole streaming run. The real captures don't do that --
+they send it again a SECOND time, specifically right at the moment `0x04`
+zone traffic actually starts (5 microseconds before frame 106's first
+`0x04` write in `test123.pcapng`; ~50ms before the first `0x04` write in
+`123.pcapng`), not just once at overall session start. `test123.pcapng`
+also shows a third occurrence, paired with the `ReportID=0` write, ~5s
+later mid-stream (t=25.52s) while `0x04` traffic is already flowing
+continuously (checked: no gap in the surrounding `0x04` stream, so this
+isn't a clean "new layer" boundary, more likely a UI-driven event on
+Aura Creator's side -- inconclusive on its own).
+
+**So the real, still-open, worth-testing question**: does re-sending
+`SET_REPORT(Output, ReportID=1, wIndex=0, data=[0x01,0x01])` a SECOND
+time, immediately before the first `0x04` write (i.e., right after
+priming finishes, right before streaming starts -- not just once before
+priming like every script currently does), change the outcome? Nobody
+has tried the repeated-invocation timing, only the single-invocation-
+before-priming timing that's already failed. Low-cost to test: one extra
+line in an existing script, no new hardware access needed. Given it's
+already failed once in this exact form, treat this as a low-confidence
+lead worth a quick try, not a strong candidate -- the earlier framing in
+this section overstated its novelty.
+
+Raw analysis was done against `25/test123.pcapng` and `25/123.pcapng`
+directly (both already in the repo, pushed by the user); no new capture
+files were added this session, only this write-up.
+
+**Real hardware test run, real hazard hit and noted for future sessions.**
+Ran the repeated-invocation test above live (`usb_capture_session6/
+test_repeated_report1.ps1`) against a RainbowCycle-primed baseline. Both
+`0x0201` Output writes failed at the Windows API level this run
+(`HidD_SetOutputReport` returned `ERROR_INVALID_FUNCTION`, err=1) -- the
+priming triplet and `0x0305` handshake still succeeded. User observed a
+real, visible, non-RainbowCycle-explainable effect during/after the run:
+kbd3 turned green (matching the streamed `0x04` write) AND several
+lightbar zones (left/right/front) went dark -- RainbowCycle cycles
+through colours, it doesn't turn zones off, so this wasn't just
+coincidental colour-cycling. **This state persisted through**: a
+`LightingService` restart, AND a full USB composite-device disable/
+re-enable (not just the single `MI_01` collection -- the deeper reset
+from Windows session 7). Neither cleared it. Recommended and the user is
+doing a full reboot, which should clear it since nothing sent this
+entire investigation, on either OS, has ever been a persistent/flash
+write -- every command found in every capture has been a volatile
+SET_REPORT/Feature write.
+
+**Not yet understood, flagged for whoever picks this up next**: was the
+stuck state caused by the `0x0201` API failure itself (Windows' HID
+stack partially processing an invalid-function request in a way that
+corrupts EC-side state), by something in the priming/streaming sequence
+unrelated to the failed writes, or is "kbd3 green + specific lightbars
+dark" actually a REAL, if incomplete, positive signal for `0x04`
+finally partially working, that just happened to also leave the device
+in a state normal software can't override? Genuinely unclear from this
+one uncontrolled data point. If reproducible after reboot with a clean
+methodology (capture running, static baseline instead of RainbowCycle,
+one variable changed at a time), this could be either a real lead or a
+red herring -- needs controlled reproduction before drawing conclusions
+either way. Capture from the recovery attempt (full composite disable/
+enable, which did NOT clear the stuck state) is saved as
+`usb_capture_session6/pcap3_full_composite_disable_enable.pcapng` for
+whoever wants to check whether it shows anything unusual compared to
+the session 7 single-collection capture.
