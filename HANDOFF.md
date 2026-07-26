@@ -2358,6 +2358,77 @@ enable of the single `MI_01` HID collection so far (Windows session 7),
 never a real sleep/wake. That's the one clean, concrete, still-untried
 ask remaining for whoever picks this back up.
 
+## Linux session 6, responding to Windows session 9's BREAKTHROUGH (2026-07-26)
+
+Windows pushed a major result: a real, wire-verified, live-confirmed
+`0x04` lightbar activation from code for the first time this entire
+investigation, using a `count=5` multi-zone packet (`kbd1-4` at
+near-zero alpha, `back_right` lightbar zone at full alpha yellow-green).
+See `HANDOFF.md` "BREAKTHROUGH (Windows session 9)" above for the full
+decode and packet bytes, and "NOT resolved" for the open question their
+own isolation retest raised (`count=1` on the same zone gave opposite
+results on two consecutive runs).
+
+**Immediately replicated on Linux**, byte-for-byte, via raw `libusb`
+(`rog-platform/examples/g615lr-count5-multizone.rs`, real `b3/b4/b5`
+RainbowCycle priming matching what Windows used): **result differs from
+Windows.** Whole chassis (keyboard AND lightbar) just continued
+RainbowCycle, no independent override -- same confound as every
+`count=1` test all session, not the clean "lightbar yellow-green,
+keyboard off" result Windows got with the identical bytes. Retried the
+exact same script a second time (Windows' own isolation test flipped
+between runs with no code change, so a retry was worth checking before
+concluding anything) -- **consistent negative both times**, rules out
+simple run-to-run non-determinism as the explanation on our end.
+
+**Tried without priming too** (`g615lr-count5-no-priming.rs`, real dark
+reset instead of the RainbowCycle-triggering triplet) -- **zero effect,
+stayed dark.** So neither priming nor no-priming produces the Windows
+result; priming state isn't the variable that explains the platform
+difference (Windows succeeded WITH priming, we failed both ways).
+
+**New, real, reproducible discrepancy found while chasing this**: every
+test above used raw `libusb` with `detach_kernel_driver()` -- the
+Linux kernel's HID driver is completely unbound from the device while we
+write to it, unlike Windows' `HidD_SetFeature`, which goes through the
+always-attached HID class driver stack. Tested the identical `count=5`
+packet via `HIDIOCSFEATURE` on `/dev/hidraw2` instead (kernel driver
+NOT detached, closest match to what Windows actually does) -- **fails at
+the transport level with a genuine `EPROTO` (USB stall)**, confirmed NOT
+caused by `asusd` contention (retried with `asusd` fully stopped, same
+error). This is significant: a `count=1` packet succeeded fine via this
+exact same `HIDIOCSFEATURE` path earlier tonight
+(`hidraw_fresh_lookup_wire_verified.pcapng`) -- so something about the
+*attached* kernel driver specifically rejects multi-zone (`count>1`)
+Feature report content that a single-zone packet doesn't trigger, while
+bypassing the kernel driver entirely (raw `libusb`) lets the identical
+bytes through at the transport level (just with no visible effect).
+
+**Not yet resolved, real lead for whoever picks this up**: GitHub rate-
+limited both `WebFetch` and direct `curl` access to `hid-asus.c` before
+`asus_report_fixup` could be checked (the one place this driver actively
+rewrites/validates outgoing report data, most likely explanation for a
+content-dependent -- not length-dependent, both are 51 bytes -- rejection
+like this). Check that function first in a future session; if it
+restricts/rewrites Feature reports based on zone count or similar, that
+would directly explain why `count>1` behaves differently under the
+attached driver specifically.
+
+**Where this leaves the count>1 hypothesis**: genuinely still open, now
+with MORE evidence than before but no resolution. Windows' own account
+already flagged their `count=1` isolation test as contradicting itself
+between runs, unresolved on their end too. Given tonight's new finding
+(attached driver actively rejects `count=5` via `HIDIOCSFEATURE`,
+detached `libusb` accepts the bytes but shows nothing), the cleanest
+next test for whoever continues this: try `count=5` via `HIDIOCSFEATURE`
+successfully first (once whatever's causing the `EPROTO` is understood
+or worked around), since that's the closest possible match to Windows'
+own successful transport path -- raw `libusb` with a detached driver may
+simply never have been capable of reproducing this regardless of packet
+content, since it's a fundamentally different code path than what
+Windows/the real working Linux `asusd` dispatch (`HidRaw::
+set_feature_report`, also `HIDIOCSFEATURE`-based) would use.
+
 **Real hazard recurrence, noted for future sessions**: the ~6-minute
 `g615lr-bruteforce-allgroups.rs` sweep got interrupted mid-run (Ctrl+C),
 which killed the built-in keyboard again -- `SIGINT` terminates the
