@@ -2939,3 +2939,66 @@ Analysis script: `C:\Users\Krushna\re\decode_multizone.py` (local only,
 not committed -- pure analysis tool, references temp hex dumps outside
 the repo; rewrite against `25/`'s files directly if this needs to be
 reproduced in a future session).
+
+## BREAKTHROUGH (2026-07-26, Windows session 9, immediately after the decode above): first-ever successful `0x04` reproduction from our own raw HID code
+
+**This is the actual answer.** Built
+`usb_capture_session7/test_count5_multizone.ps1`: real `0x5d b3/b4/b5`
+priming (matching what real Aura sent before its own working write),
+then the EXACT byte-for-byte `count=5` packet decoded above (zone list
+`kbd1, kbd2, kbd3, kbd4, back_right`; keyboard zones at `R,G,B,A =
+0,0,0,1`; `back_right` at `R,G,B,A = 0x61,0xff,0x00,0xff`), sent via
+`HidD_SetFeature` through `HidSend.cs` -- the same raw HID mechanism
+every other test all investigation has used -- streamed continuously
+(since we don't have Aura's own `0x0305` stream to hold the state).
+
+**Result, live human-confirmed, twice**: **the back-right lightbar zone
+lit up yellow-green, keyboard stayed off/unchanged.** First run the user
+asked for a repeat (didn't catch it in time); second run, 20s, explicit
+live confirmation: "Lightbar zone lit yellow-green, keyboard stayed
+off." Wire-verified via a parallel `USBPcap3` capture
+(`usb_capture_session7/pcap3_count5_multizone_test.pcapng`) -- the
+captured packet on the wire is **byte-for-byte identical** to both the
+intended packet and to Aura's own real working write from
+`static_armory_to_aura_lightbar_only.pcapng`:
+```
+09 04 03 01 00 33 00 04 05 01 00 00 01 00 02 00 03 00 04 00 00 00 00 00
+00 00 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 61 ff 00 ff 00 00
+00 00 00 00 00 00 00 00
+```
+This is, after dozens of failed hypotheses across every session this
+entire investigation on both Windows and Linux, the first time `0x04`
+has done ANYTHING visible when sent from code we wrote ourselves,
+rather than by Aura's own real software.
+
+**What actually changed, and genuine uncertainty about which part of it
+mattered**: every single `0x04` test before this one -- across this
+entire investigation, both OSes -- used `count=1` (one zone per
+packet). This is the first `count>1` test ever run. It succeeded. But
+it's ALSO the first time zone `0x04` (`back_right`) specifically was
+targeted at all -- every prior single-zone test used a different zone
+(`0x00` kbd1, `0x02` kbd3, `0x06` back_corner_right, `0x0D`
+CornerFrontLeft). So there are two live hypotheses, not cleanly
+separated by this one test:
+1. **`count>1` (a real multi-zone batch) is the missing prerequisite** --
+   maybe the firmware only renders `0x04` writes that address multiple
+   zones together, or specifically requires keyboard zones to be
+   present (even at alpha~0) alongside a lightbar zone in the same
+   packet.
+2. **Zone `0x04`/`back_right` specifically behaves differently** from
+   every other zone tried so far, for reasons unrelated to `count`.
+
+**The immediate, obvious, single-variable follow-up test, not yet run**:
+send a `count=1` packet targeting ONLY zone `0x04` (`back_right`) alone,
+same priming, same colour, same alpha=0xff. If that also lights the
+lightbar, hypothesis 2 is confirmed and `count>1` never mattered --
+every prior test just happened to pick zones that don't work for some
+other reason. If it produces the usual zero effect, hypothesis 1 is
+confirmed -- `count>1` (or specifically "keyboard zones present in the
+same packet") is the real missing piece, and this reframes the entire
+remaining investigation on both OSes: every existing Linux test
+(`g615lr-alpha-ramp.rs`, `g615lr-corner-no-priming.rs`, etc.) would need
+to be rerun as genuine multi-zone batches instead of single-zone writes.
+
+This is the single most important thing for whoever picks this up next
+to do first, on whichever OS is more convenient.

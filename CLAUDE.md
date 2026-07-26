@@ -105,6 +105,20 @@ entirely.
 
 ## Current state (check `git log` for anything newer than this)
 
+- 🎯🎯 **BREAKTHROUGH (2026-07-26, Windows session 9): first-ever
+  successful `0x04` reproduction from our own code, not just Aura's.**
+  Sent a real `count=5` multi-zone packet (5 zones in one write,
+  keyboard zones at alpha~0, lightbar zone `back_right` at full alpha
+  with a real colour) via raw `HidD_SetFeature` on Windows — the
+  lightbar zone lit up, live-confirmed twice, wire-verified byte-for-
+  byte identical to a real Aura capture. Every prior `0x04` test on
+  either OS used `count=1` (one zone per packet) — this is the first
+  `count>1` test ever run, and it worked. **Not yet confirmed which
+  variable mattered** — it's also the first time zone `0x04` itself was
+  tried. The critical next test (not yet done as of this writing): a
+  `count=1` packet targeting only `back_right` alone. See `HANDOFF.md`
+  "BREAKTHROUGH" and `QUESTIONS.md` for full detail — read this before
+  anything else below, it may make some of it obsolete.
 - ✅ Basic whole-chassis colour/effect control via the classic `0x5d`
   protocol: **shipped and working**, 5 of 12 built-in modes confirmed live
   (`Static`, `Breathe`, `RainbowCycle`, `RainbowWave`, `Pulse`), the other

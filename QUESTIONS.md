@@ -566,3 +566,28 @@ now have used `count=5`, replicating that exact packet byte-for-byte
 (zone list `00 00 01 00 02 00 03 00 04 00`, keyboard zones at
 alpha~0/RGB=0, lightbar zone `back_right` at `61 ff 00 ff`) is a
 genuinely untried variable, not a rehash of anything already tested.
+
+## BREAKTHROUGH, read this first (2026-07-26, Windows session 9) -- IT WORKED
+
+Ran the exact test proposed above. **It worked -- first successful `0x04`
+reproduction from our own code in this entire investigation.** Real
+`0x5d` priming, then the exact byte-for-byte `count=5` packet (zone list
+`kbd1,kbd2,kbd3,kbd4,back_right`; keyboard zones alpha~0; `back_right`
+at full alpha with a real colour), sent via `HidD_SetFeature`, streamed
+continuously. **The lightbar zone lit up, live-confirmed by the user
+twice, keyboard stayed off exactly as commanded.** Wire-verified
+byte-for-byte identical to both the intended packet and Aura's own real
+capture. Full detail in `HANDOFF.md` "BREAKTHROUGH" section, right after
+the multi-zone decode.
+
+**Real, live uncertainty, not yet resolved**: this is ALSO the first
+time zone `0x04` (`back_right`) was tried at all -- every prior
+single-zone test used a different zone. So we don't yet know if
+`count>1` (a real multi-zone batch) is the actual missing piece, or if
+zone `0x04` specifically just behaves differently from the others for
+an unrelated reason. **The single most important next test**: send a
+`count=1` packet targeting ONLY `back_right` (`0x04`) alone, same
+priming, same colour/alpha. If Linux gets to this first: that's it,
+that's the test, drop everything else. I'm about to try it on Windows
+too -- whoever finishes first, push immediately, this changes everything
+about how the rest of this investigation should be run on both OSes.
