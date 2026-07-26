@@ -2716,3 +2716,70 @@ been sent by anyone testing this protocol before tonight.
 Capture: `usb_capture_session7/sleep_resume_capture.pcapng`. Answers
 Linux's `QUESTIONS.md` ask directly -- see that file for the relayed
 answer.
+
+## Windows session 9, continued -- Windows' own "Dynamic Lighting" checked, real negative
+
+User's own idea, tested immediately after the sleep/resume capture: does
+Windows 11's built-in "Dynamic Lighting" feature (Settings > Personalization
+> Dynamic Lighting) use Microsoft's own standardized, PUBLICLY-documented
+HID LampArray protocol to drive this device, bypassing ASUS's proprietary
+`0x04`/`0x0305` protocol entirely? If so, that would have been a
+completely different and far better-documented path forward than
+reverse-engineering ASUS's own protocol. Genuinely worth checking --
+interface 1's vendor collection uses HID Usage Page `0x59`, which
+happens to be the SAME Usage Page number the real USB HID spec assigns
+to "Lighting And Illumination" (the LampArray page), a detail Linux's
+report-descriptor parse in session 6 had flagged as "non-standard/
+vendor" without checking whether it might actually be the real assigned
+page.
+
+**Test**: captured live (`usb_capture_session7/dynamic_lighting_capture.pcapng`,
+1208 packets) while manually: starting the capture with Armoury Crate's
+RainbowCycle already running -> switching Windows Settings' device
+priority so "Dynamic Lighting" took control instead of Armoury Crate
+(chassis went static) -> changing the Dynamic Lighting mode to Breathing
+-> changing brightness 2-4 times -> switching priority back to Armoury
+Crate.
+
+**Result: real negative on the interesting hypothesis.** Every single
+write in the entire capture is still the exact same already-known
+`SET_REPORT Feature ReportID=5` (`0x0305`) structure
+(`05 01 00 00 0f 00 [alpha] [byte] [byte]`) -- confirmed by checking
+`usb.data_len` across the whole capture: only sizes 8/18/72 appear, same
+as every other capture this investigation, no new report ID, no
+distinctive LampArray-style report structure (real LampArray devices use
+dedicated `LampArrayAttributesReport`/`LampMultiUpdateReport`-style
+reports, nothing like this). Extracted the byte7 (alpha/phase) values
+across the whole capture and the pattern tells the real story:
+- t=0-4.2s: smooth continuous hue rotation (RainbowCycle, matches the
+  pre-switch baseline).
+- t=13.2-13.3s and t=21.3-26.3s: several consecutive `00 00 00` frames --
+  real black/off moments, matching the two priority-switch instants the
+  user described ("it was static when dynamic took control").
+- t=13.7-21s: values hovering near a fixed hue with the middle byte
+  oscillating (`ff` down to `80` and back) -- consistent with a real
+  static colour, then Breathing's brightness pulse on that fixed hue,
+  matching exactly what the user did in this window.
+- t=26.7s onward: smooth hue rotation resumes -- matches switching
+  priority back to Armoury Crate/RainbowCycle at the end.
+- Only two `0x5d` handshake-sized (72-byte) writes in the ENTIRE capture,
+  at t=5.5s and t=27.6s -- lining up with the two priority-switch
+  moments, each triggering the same already-known mode-restore handshake
+  before `0x0305` streaming resumes. Nothing new in their structure.
+- **No `0x04` write anywhere in this capture either**, even while
+  actively switching between Windows' native lighting control and
+  Armoury Crate.
+
+**Conclusion**: Windows' Dynamic Lighting feature does NOT talk to this
+device over a separate, standardized LampArray wire protocol. Whatever
+"Dynamic Lighting support" ASUS advertises for this laptop is implemented
+as a translation layer inside `LightingService` itself -- Windows' native
+lighting API calls get converted into the exact same proprietary
+`0x0305` stream Armoury Crate already uses, not a parallel Microsoft-
+documented protocol. This closes out a real, worth-checking alternative
+path (better to know for certain than to wonder), but it doesn't open a
+new one -- `LightingService` remains the single point of control
+regardless of which UI nominally has "priority," and the underlying
+mystery (`0x04`'s missing prerequisite) is unaffected by any of this.
+
+Capture: `usb_capture_session7/dynamic_lighting_capture.pcapng`.
