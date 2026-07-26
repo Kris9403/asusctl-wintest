@@ -2305,6 +2305,59 @@ Added a stale-document notice pointing to `HANDOFF.md`/`CLAUDE.md` as
 the authoritative source, left the file in place since its `0x04` packet
 format documentation is still accurate.
 
+**"Does the lightbar ever get woken up?" -- checked via kernel source AND
+a live capture, both say no (2026-07-25, still later same session).**
+User raised a sharp hypothesis: keyboard zones lit up tonight, lightbar
+never did -- what if there's a "wake the lightbar" step that just never
+happens, the same way a keyboard backlight often needs an explicit
+restore after sleep? Checked two ways:
+
+1. Fetched the real Linux `hid-asus.c` kernel driver source in full
+   (verified verbatim, not paraphrased). `asus_resume()` (the PM resume
+   callback) sends exactly `[FEATURE_KBD_REPORT_ID(0x5a), 0xba, 0xc5,
+   0xc4, stored_brightness]` -- this is the exact "`5a ba c5 c4`" packet
+   found mysterious earlier tonight, now fully explained: it's the
+   keyboard-backlight-brightness restore-after-resume command, trailing
+   byte = the actual brightness value. **Confirms the kernel driver has
+   ZERO lightbar-awareness anywhere** -- not filtered/suppressed, just
+   never written with any knowledge this separate protocol exists on this
+   board. `asus_raw_event` filtering `0x5d`/`0x5e` only discards
+   unsolicited INBOUND reports (interrupt IN noise), unrelated to
+   outbound command capability. Same gap confirmed in this repo's own
+   code: the sleep/wake handler in `asusd/src/aura_laptop/trait_impls.rs`
+   only calls `write_current_config_mode` (classic `0x5d` only) on wake --
+   `write_lightbar_2025` isn't wired into any automatic path at all, 100%
+   manual-trigger only.
+
+2. **Tested live**: captured a real suspend-to-idle/resume cycle with
+   Wireshark on `usbmon5` (first time this exact scenario tried this
+   session -- every prior capture came from process-level interface
+   detach/reattach, never a genuine PM sleep/wake). Filtered to just our
+   device (address 2, since `usbmon5` also captures the Bluetooth adapter
+   and webcam sharing the same bus -- their traffic was initially
+   miscategorised as false-positive "0x04"/"0x06" reports before
+   filtering by device address caught the mistake). **Result: caught
+   `asus_resume()` firing live, multiple times** (`5a ba c5 c4 00`, `5a ba
+   c5 c4 00`, `5a ba c5 c4 03` -- brightness value changing between
+   events), confirming the kernel source finding on the actual wire for
+   the first time. **Nothing else happens** -- no `0x5e`, no `0x5d`
+   handshake, no `0x04`, nothing lightbar-related at all. Notably LESS
+   than the earlier kernel-reprobe capture (which had the full `0x5a`/
+   `0x5d`/`0x5e` three-way handshake) -- PM resume and a full USB re-probe
+   are architecturally different events; resume just changes power state
+   on an already-connected device, it's a lighter event than the fresh
+   re-enumeration our `detach_kernel_driver` cycling was actually
+   triggering.
+
+**Closes the Linux side of this hypothesis definitively**: Linux's own
+resume path does nothing for the lightbar, confirmed live, not just
+inferred from source. **Still genuinely open**: whether Windows'
+Armoury Crate does something lightbar-specific on an actual suspend-to-
+RAM/resume cycle -- Windows has only tried a Device Manager disable/
+enable of the single `MI_01` HID collection so far (Windows session 7),
+never a real sleep/wake. That's the one clean, concrete, still-untried
+ask remaining for whoever picks this back up.
+
 **Real hazard recurrence, noted for future sessions**: the ~6-minute
 `g615lr-bruteforce-allgroups.rs` sweep got interrupted mid-run (Ctrl+C),
 which killed the built-in keyboard again -- `SIGINT` terminates the
