@@ -2488,6 +2488,50 @@ negative-result-tested as a reverse-engineering investigation can get
 without new external information (ASUS documentation, or someone with
 direct firmware knowledge).
 
+## Linux session 7 (2026-07-27) -- the final two tests of this investigation
+
+Two more, both real, both negative, closing out this session.
+
+**Deep USB-core-level reset** (`/sys/bus/usb/devices/5-4/authorized`
+toggled 1->0->1, forcing a genuine full logical disconnect/reconnect of
+the whole composite device -- deeper than any driver-unbind test this
+whole investigation): confirms the exact same `0x5a`/`0x5d`/`0x5e`
+three-way handshake already fully characterized in the earlier kernel-
+reprobe capture, byte-for-byte identical structure. Nothing new. Closes
+out "does an even deeper reset reveal a hidden extra step" -- no.
+Capture: `linux_capture_session7/authorized_toggle_full_reenum.pcapng`.
+
+**Dark -> static blue -> front-lightbar-only** (`g615lr-dark-blue-
+frontbar.rs`): a fresh combination never tried before -- a distinct
+STATIC BLUE transition step (not RainbowCycle priming, not a plain dark
+reset) before a `count=4` packet targeting only the front lightbar zones
+(`0x0C/0x0D/0x0E/0x0F`, bright cyan, full alpha, no keyboard zones
+addressed at all this time). Wire-verified byte-correct via `dumpcap`
+run directly across all six `usbmon` interfaces simultaneously (a
+working pattern for automated capture, sidesteps the earlier AppArmor/
+`sudo tshark` issues). **Visually: whole chassis stayed static blue,
+front lightbar showed nothing distinct.** Same negative result as every
+other `0x04` test this entire investigation, on a combination that
+hadn't been tried. Capture: `linux_capture_session7/
+dark_blue_frontbar_wire_verified.pcapng`.
+
+**Closing summary for this session**: at this point, essentially every
+variable controllable from Linux userspace has been tested against the
+`0x04` per-zone lightbar goal -- packet content (single-zone and multi-
+zone), wire transmission, priming state (none, RainbowCycle, static
+colours), animation-engine state, zone selection (keyboard, corners,
+bars, individually and in combination), batch count (1 through 8),
+kernel-driver-attached vs detached transport, clean-boot vs carried-over
+session state, USB configuration/alternate settings, MS OS descriptor
+content, and now the deepest possible bus-level reset. None of it
+changes the outcome. The classic `0x5d` whole-chassis protocol (5 of 12
+modes) and the `0x5d bc` custom-mode keyboard-zone protocol both work
+and are real wins from this investigation. Independent per-zone lightbar
+control via `0x04` remains unresolved on Linux, with an exhaustive,
+well-documented negative-result trail for whoever continues this next --
+either with new information from Windows/the community, or a
+fundamentally different approach than byte-level guessing.
+
 **Real hazard recurrence, noted for future sessions**: the ~6-minute
 `g615lr-bruteforce-allgroups.rs` sweep got interrupted mid-run (Ctrl+C),
 which killed the built-in keyboard again -- `SIGINT` terminates the
