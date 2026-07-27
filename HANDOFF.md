@@ -2429,6 +2429,65 @@ content, since it's a fundamentally different code path than what
 Windows/the real working Linux `asusd` dispatch (`HidRaw::
 set_feature_report`, also `HIDIOCSFEATURE`-based) would use.
 
+## Linux session 6, the clean-boot decisive test + MS OS descriptor investigation (2026-07-27)
+
+Per direct instruction, used a genuine fresh reboot (user rebooted the
+laptop specifically for this) to run THE test both Windows session 9 and
+Linux independently converged on as the one thing that would actually
+distinguish "count>1 required" from "carried-over device state" as the
+explanation for Windows' own contradictory `count=1` isolation runs.
+
+**`g615lr-clean-boot-count1.rs`**: real `b3/b4/b5` RainbowCycle priming
+(matching Windows' exact successful conditions) -> `count=1` targeting
+ONLY `back_right` (wire `0x04`), same colour Windows used
+(`0x61,0xff,0x00,0xff`), as the literal first-ever touch of that zone
+this boot -- zero prior `0x04` exposure of any kind. **Result: still just
+rainbow, zero independent override.** This is the cleanest possible
+negative result of the whole investigation -- every variable now
+controlled for simultaneously (exact zone, exact colour, exact count,
+exact priming, and now genuinely fresh session state) and the outcome on
+Linux never changes.
+
+**New angle explored afterward**: does this firmware have Windows-
+specific enumeration-time behaviour Linux never triggers? Checked for a
+**Microsoft OS Descriptor** (a legacy, pre-BOS mechanism many Windows-
+only vendor devices implement; this device's `bcdUSB=2.00` rules out the
+modern BOS-based MS OS 2.0 mechanism, which needs `bcdUSB>=2.01`, but the
+older string-descriptor-based MS OS 1.0 mechanism doesn't have that
+requirement). **Confirmed real and present**
+(`g615lr-msos-descriptor-check.rs`): `GET_DESCRIPTOR(STRING, index=0xEE)`
+returns a genuine `"MSFT100"` signature with `bMS_VendorCode=0x7F` --
+this device really does implement this Windows-only mechanism, something
+Linux's kernel has zero knowledge of or interaction with at all.
+
+Followed up (`g615lr-msos-compatid.rs`, `g615lr-msos-properties-full.rs`):
+Extended Compat ID (the sub-query that would indicate Windows binds a
+non-standard driver like WinUSB instead of the generic HID class driver)
+**stalls -- not implemented**, consistent with Windows' own captures
+already showing completely standard `HidD_SetFeature` calls this whole
+investigation, not raw WinUSB access. Extended Properties (the sub-query
+for arbitrary custom registry data) **does respond, real 76-byte
+descriptor, identical on both interfaces** -- decoded fully: one
+property, `SelectiveSuspendEnabled` (REG_DWORD) `= 1`. **This is a
+completely mundane, standard Windows USB power-management hint** ("safe
+to selectively suspend this device when idle") -- nothing about driver
+selection, nothing vendor-specific, nothing that touches the `0x04`
+mystery. Real, novel, confirmed-not-assumed finding, but a genuine dead
+end for explaining the platform difference.
+
+**Where this leaves things**: every plausible explanation controllable
+from either OS's userspace/runtime has now been tested and ruled out --
+packet bytes, wire transmission, priming state, animation-engine state,
+zone type, count (1 vs 5), attached vs detached kernel driver, clean
+vs carried-over session state, and now MS OS descriptor content. The
+remaining gap is either something in the raw USB enumeration handshake
+itself (full electrical/timing-level comparison between platforms, not
+just command content -- neither side has done this), or something
+neither side has thought to check yet. This is about as exhaustively
+negative-result-tested as a reverse-engineering investigation can get
+without new external information (ASUS documentation, or someone with
+direct firmware knowledge).
+
 **Real hazard recurrence, noted for future sessions**: the ~6-minute
 `g615lr-bruteforce-allgroups.rs` sweep got interrupted mid-run (Ctrl+C),
 which killed the built-in keyboard again -- `SIGINT` terminates the

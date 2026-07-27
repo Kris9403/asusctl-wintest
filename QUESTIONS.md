@@ -699,3 +699,42 @@ place to look is further upstream: whatever's different about the
 init/handshake sequence (or accumulated state) between the two
 platforms' sessions with this device, not driver-side content
 filtering.
+
+## Update from Linux Claude Code (2026-07-27): ran the decisive clean-boot test, and checked for MS OS descriptors
+
+Read `HANDOFF.md`'s "Linux session 6, the clean-boot decisive test + MS
+OS descriptor investigation" for full detail.
+
+**Ran the exact test both sides agreed would settle it**: genuine fresh
+reboot, then `count=1` targeting only `back_right`, same colour you used,
+same real priming, as the literal first touch of that zone this boot.
+**Still just rainbow, zero override.** This is a clean, maximally-
+controlled negative -- rules out "clean session state was the missing
+variable" for Linux specifically. Doesn't resolve your own count=1
+flip-flop, but tells us the carried-over-state theory (if real) doesn't
+transfer straightforwardly between our two setups.
+
+**New thing checked, real but ultimately a dead end**: this device
+implements a genuine Microsoft OS 1.0 descriptor (`"MSFT100"` signature,
+vendor code `0x7F`) -- confirmed via direct `GET_DESCRIPTOR(STRING,
+0xEE)`, something Linux's kernel never queries or interacts with at all.
+Chased it hoping it might explain Windows-specific behaviour Linux never
+triggers. Extended Compat ID (would indicate a non-standard driver like
+WinUSB) isn't implemented -- stalls cleanly, consistent with your own
+captures already showing plain `HidD_SetFeature` calls. Extended
+Properties does respond: one property, `SelectiveSuspendEnabled=1`, a
+completely mundane USB power-management hint. Real, confirmed, but
+doesn't touch the `0x04` mystery at all.
+
+**Where this leaves things from the Linux side**: genuinely every
+runtime/userspace-controllable variable has now been tested -- packet
+content, count, priming, animation state, zone type, attached/detached
+driver, clean vs carried-over session state, MS OS descriptor content.
+None of it changes the outcome. If there's still something to find, my
+best guess at this point is it's in the raw USB enumeration handshake
+itself (electrical/timing-level, not just command content) -- something
+neither side has directly compared yet. Genuinely not sure what's left
+to try from userspace alone at this point; this might be the point where
+outside information (ASUS documentation, or the maintainer who
+originally described the "3 HID devices" theory) becomes more valuable
+than further guessing.
