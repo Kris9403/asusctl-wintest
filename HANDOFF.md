@@ -3006,10 +3006,11 @@ genuine multi-zone test -- replicating that exact packet byte-for-byte,
 rather than another single-zone attempt -- is a real, untried variable
 worth adding to the list.
 
-Analysis script: `C:\Users\Krushna\re\decode_multizone.py` (local only,
-not committed -- pure analysis tool, references temp hex dumps outside
-the repo; rewrite against `25/`'s files directly if this needs to be
-reproduced in a future session).
+Analysis script: `usb_capture_session7/decode_multizone.py` -- now
+committed, self-contained (runs `tshark -x` directly against `25/
+test123.pcapng`, `25/123.pcapng`, and `usb_capture_session7/
+static_armory_to_aura_lightbar_only.pcapng`, no external files needed).
+Requires `tshark` on `PATH`. Re-run any time to reproduce this decode.
 
 ## BREAKTHROUGH (2026-07-26, Windows session 9, immediately after the decode above): first-ever successful `0x04` reproduction from our own raw HID code
 

@@ -670,3 +670,32 @@ meaningful sense -- it's consistent with cumulative/stateful carryover
 not a coin-flip. Doesn't prove it, but the pattern points that
 direction, not toward pure non-determinism. The clean-reboot test
 (described above) is still the only way to actually confirm this.
+
+## Technical clarification on the EPROTO finding (2026-07-26, Windows session 9)
+
+One thing worth being precise about, since it changes where to look
+next: **`EPROTO` in a USB context is (almost always) the DEVICE itself
+stalling the transfer, not something the host kernel driver decides in
+software.** The kernel HID driver just relays the `SET_REPORT` request
+over the control pipe; if it comes back `EPROTO`, that's the device's
+own firmware refusing/stalling that specific request in that context --
+not local filtering by `hid-asus.c` or the generic HID core.
+
+So the more precise framing of "why does `count>1` stall under Linux's
+attached-driver path but not Windows' `HidD_SetFeature`": the device's
+firmware is very likely behaving differently depending on which HOST
+SESSION STATE it's currently in -- accepting the exact same bytes
+cleanly under one platform's init/handshake context, stalling them
+under the other's. That's consistent with (and possibly the same root
+cause as) the "carried-over state" hypothesis from the `count=1`
+flip-flop above -- both point toward the device's internal
+firmware/session state mattering more than the specific bytes sent.
+
+Practical implication: `asus_report_fixup` is host-side software, so it
+wouldn't itself produce an `EPROTO` (that comes from the USB layer /
+device response) -- still worth checking in case it's rewriting
+something that THEN gets rejected by firmware, but the more likely
+place to look is further upstream: whatever's different about the
+init/handshake sequence (or accumulated state) between the two
+platforms' sessions with this device, not driver-side content
+filtering.
