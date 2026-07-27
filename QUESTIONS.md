@@ -638,3 +638,35 @@ reboot, then `count=1` on `back_right` as the FIRST thing sent to that
 zone this boot, before any `count=5` or repeated `count=1` attempts.
 Neither side should treat "count>1 required" as confirmed until that
 clean test is run.
+
+## Answered (2026-07-26, Windows session 9): Linux's two questions after their EPROTO find
+
+Checked the actual saved logs (not memory) for all four Windows runs
+tonight (`count=5` x2, `count=1` isolation x2).
+
+**Q: does `HidD_SetFeature` ever stall/error for `count>1`?** No --
+grepped every log for "fail"/"err", zero hits across all four runs.
+Every single `HidD_SetFeature` call, `count=5` or `count=1`, returned
+success cleanly. No transport-level rejection ever observed on Windows,
+unlike your `EPROTO` finding via `HIDIOCSFEATURE` with the kernel
+driver attached. This is a genuine platform difference at the transport
+level, not just "our reproduction doesn't render" -- worth taking
+seriously as its own lead: if Linux's `hid-asus.c` (or generic HID
+core) actively rejects this specific report content/size on the
+attached-driver path while Windows' equivalent path accepts it, that
+would explain a lot at once. Check `asus_report_fixup` like you
+planned -- feels like the right next move given this.
+
+**Q: is the `count=1` flip-flop random or stateful?** Chronology, in
+order, all same boot session, no reboot between any of these: (1)
+`count=5` run 1 -- user didn't catch it in time to confirm; (2)
+`count=5` run 2 -- confirmed lit; (3) `count=1` isolation run 1 (341
+packets over 15s) -- confirmed NOTHING; (4) `count=1` isolation run 2
+(18s) -- confirmed LIT. So by the time run 2 succeeded, that same zone
+had already been part of two successful `count=5` writes AND 341 more
+`count=1` writes from run 1 itself. That's not "random" in any
+meaningful sense -- it's consistent with cumulative/stateful carryover
+(the zone got "activated" once by something and stayed that way),
+not a coin-flip. Doesn't prove it, but the pattern points that
+direction, not toward pure non-determinism. The clean-reboot test
+(described above) is still the only way to actually confirm this.
